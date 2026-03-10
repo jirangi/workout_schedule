@@ -1,1 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-rgb: 248, 250, 252;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-rgb));
+  -webkit-font-smoothing: antialiased;
+}
+
+/* [Design Spec 4.1] 프리미엄 카드 스타일 공통 적용 */
+.premium-card {
+  @apply rounded-[2.5rem] shadow-2xl transition-all active:scale-95;
+}
