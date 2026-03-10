@@ -1,16 +1,17 @@
 # 📐 [Minimal Fit] 설계서 v1.0.0 (Design Spec)
 
 ## 1. 프로젝트 구조 및 파일 시스템 (File System)
-소스 코드의 가독성과 유지보수성을 위해 관심사 분리(SoC) 원칙을 준수합니다.
 
 | 분류 | 파일/경로 | 역할 |
 | :--- | :--- | :--- |
-| **Config** | `/next.config.mjs` | GitHub Pages 배포 경로(basePath) 및 정적 출력(export) 설정 |
-| **Data** | `/data/exercises.ts` | 150종 해부학적 운동 메타데이터 (정적 JSON DB) |
-| **Logic** | `/app/page.tsx` | 메인 뷰 컨트롤러, 전역 상태 관리(State), 라우팅 로직 |
-| **Persistence** | `LocalStorage` | 포인트, 루틴 인덱스, 리워드 한도 정보의 브라우저 영구 저장 |
-| **Style** | `/app/globals.css` | Tailwind CSS 기반 프리미엄 카드 UI(곡률, 그림자) 테마 정의 |
-
+| **Config** | `/package.json` | 프로젝트 의존성 및 스크립트 정의 |
+| **Config** | `/next.config.mjs` | 배포 경로(basePath) 및 정적 출력 설정 |
+| **Config** | `/tailwind.config.ts` | UI 규격 및 40px 곡률 설정 |
+| **Config** | `/tsconfig.json` | TypeScript 컴파일 옵션 설정 |
+| **Data** | `/data/exercises.ts` | 150종 해부학적 운동 메타데이터 |
+| **Logic** | `/app/layout.tsx` | Next.js 루트 레이아웃 및 폰트 설정 |
+| **Logic** | `/app/page.tsx` | 메인 뷰 컨트롤러 및 상태 관리 로직 |
+| **Style** | `/app/globals.css` | Tailwind CSS 및 프리미엄 카드 테마 정의 |
 ---
 
 ## 2. 핵심 데이터 스키마 (Core Data Schema)
