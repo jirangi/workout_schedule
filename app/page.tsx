@@ -6,6 +6,7 @@ import { EXERCISE_DATABASE, ExerciseInfo } from "../data/exercises";
 type View = "HOME" | "WORKOUT" | "CHECK" | "FINISH";
 type RoutineType = "무분할" | "상체" | "하체";
 type Intensity = "LIGHT" | "NORMAL" | "HARD";
+type VolumeMode = "LOW" | "NORMAL" | "HIGH";
 
 interface SetLog {
   id: number;
@@ -29,6 +30,8 @@ interface SelectedRoutine {
   level: string;
   type: RoutineType;
   intensity: Intensity;
+  volumeMode: VolumeMode;
+  activeCategories: string[];
   exercises: WorkoutExercise[];
 }
 
@@ -68,6 +71,10 @@ interface UserPersistence {
   personalRecords: PersonalRecord[];
 }
 
+type PreviewOverride = Partial<
+  Pick<RoutineExercise, "defaultWeight" | "defaultReps" | "setCount">
+>;
+
 const STORAGE_KEY = "MINIMAL_FIT_DATA";
 const DAILY_REWARD_LIMIT = 2;
 const REWARD_AMOUNT = 30;
@@ -75,33 +82,46 @@ const REWARD_AMOUNT = 30;
 const INTENSITY_CONFIG: Record<
   Intensity,
   {
-    label: string;
     displayLabel: string;
-    exerciseCount: number;
     setCount: number;
     restSeconds: number;
   }
 > = {
   LIGHT: {
-    label: "Light",
     displayLabel: "가볍게",
-    exerciseCount: 4,
     setCount: 2,
     restSeconds: 45,
   },
   NORMAL: {
-    label: "Normal",
     displayLabel: "보통",
-    exerciseCount: 6,
     setCount: 3,
     restSeconds: 60,
   },
   HARD: {
-    label: "Hard",
     displayLabel: "강하게",
-    exerciseCount: 8,
     setCount: 4,
     restSeconds: 75,
+  },
+};
+
+const VOLUME_CONFIG: Record<
+  VolumeMode,
+  {
+    displayLabel: string;
+    perCategory: number;
+  }
+> = {
+  LOW: {
+    displayLabel: "낮음",
+    perCategory: 1,
+  },
+  NORMAL: {
+    displayLabel: "보통",
+    perCategory: 2,
+  },
+  HIGH: {
+    displayLabel: "높음",
+    perCategory: 3,
   },
 };
 
@@ -151,8 +171,8 @@ function formatHourMin(totalMinutes: number) {
   const rounded = Math.round(totalMinutes);
   const hour = Math.floor(rounded / 60);
   const min = rounded % 60;
-  if (hour <= 0) return `${min}m`;
-  return `${hour}h ${min}m`;
+  if (hour <= 0) return `${min}분`;
+  return `${hour}시간 ${min}분`;
 }
 
 function calculateExerciseVolume(sets: SetLog[]) {
@@ -193,10 +213,21 @@ function calculateStreak(history: WorkoutSession[]) {
   return streak;
 }
 
-function getTargetCategories(type: RoutineType) {
+function getDefaultCategories(type: RoutineType) {
   if (type === "상체") return ["가슴", "등", "어깨", "팔"];
   if (type === "하체") return ["하체", "복근"];
   return ["가슴", "등", "하체", "어깨", "복근"];
+}
+
+function getMainCategory(exercises: RoutineExercise[]) {
+  if (exercises.length === 0) return "-";
+
+  const counts = exercises.reduce<Record<string, number>>((acc, exercise) => {
+    acc[exercise.category] = (acc[exercise.category] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "-";
 }
 
 function estimateWorkoutMinutes(exercises: RoutineExercise[], restSeconds: number) {
@@ -209,17 +240,6 @@ function estimateWorkoutMinutes(exercises: RoutineExercise[], restSeconds: numbe
   const totalRestSeconds = Math.max(0, totalSets - 1) * restSeconds;
 
   return (setSeconds + totalRestSeconds) / 60;
-}
-
-function getMainCategory(exercises: RoutineExercise[]) {
-  if (exercises.length === 0) return "-";
-
-  const counts = exercises.reduce<Record<string, number>>((acc, exercise) => {
-    acc[exercise.category] = (acc[exercise.category] ?? 0) + 1;
-    return acc;
-  }, {});
-
-  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "-";
 }
 
 export default function Home() {
@@ -236,8 +256,14 @@ export default function Home() {
 
   const [routineType, setRoutineType] = useState<RoutineType>("상체");
   const [intensity, setIntensity] = useState<Intensity>("NORMAL");
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [volumeMode, setVolumeMode] = useState<VolumeMode>("NORMAL");
+  const [activeCategories, setActiveCategories] = useState<string[]>(
+    getDefaultCategories("상체")
+  );
   const [restSeconds, setRestSeconds] = useState(INTENSITY_CONFIG.NORMAL.restSeconds);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  const [previewOverrides, setPreviewOverrides] = useState<Record<string, PreviewOverride>>({});
 
   const [selectedRoutine, setSelectedRoutine] = useState<SelectedRoutine | null>(null);
   const [currentExIndex, setCurrentExIndex] = useState(0);
@@ -254,6 +280,10 @@ export default function Home() {
   const [newPRs, setNewPRs] = useState<PersonalRecord[]>([]);
 
   const speechRef = useRef<SpeechSynthesis | null>(null);
+
+  useEffect(() => {
+    setActiveCategories(getDefaultCategories(routineType));
+  }, [routineType]);
 
   useEffect(() => {
     setRestSeconds(INTENSITY_CONFIG[intensity].restSeconds);
@@ -313,33 +343,45 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [isResting]);
 
-  useEffect(() => {
-    if (!isResting || timeLeft > 0) return;
-    moveAfterRest(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeLeft, isResting]);
+  function buildGeneratedRoutine(baseIndices: Record<string, number>) {
+    const updatedIndices = { ...baseIndices };
+    const exercises: RoutineExercise[] = [];
+    const perCategory = VOLUME_CONFIG[volumeMode].perCategory;
 
-  const previewRoutine = useMemo(() => {
-    const config = INTENSITY_CONFIG[intensity];
-    const targetCats = getTargetCategories(routineType);
-    const pickedExercises: RoutineExercise[] = [];
+    activeCategories.forEach((category) => {
+      const categoryExercises = EXERCISE_DATABASE.filter(
+        (exercise) => exercise.category === category
+      );
+      if (categoryExercises.length === 0) return;
 
-    targetCats.forEach((cat) => {
-      const catExercises = EXERCISE_DATABASE.filter((exercise) => exercise.category === cat);
-      if (catExercises.length === 0) return;
+      const lastIdx = updatedIndices[category] ?? -1;
+      const pickedCount = Math.min(perCategory, categoryExercises.length);
 
-      const lastIdx = lastIndices[cat] ?? -1;
-      const nextIdx = (lastIdx + 1) % catExercises.length;
-      const nextExercise = catExercises[nextIdx];
+      for (let i = 1; i <= pickedCount; i++) {
+        const nextIdx = (lastIdx + i) % categoryExercises.length;
+        const baseExercise = categoryExercises[nextIdx];
+        const override = previewOverrides[baseExercise.id] ?? {};
 
-      pickedExercises.push({
-        ...nextExercise,
-        setCount: config.setCount,
-      });
+        exercises.push({
+          ...baseExercise,
+          defaultWeight: override.defaultWeight ?? baseExercise.defaultWeight,
+          defaultReps: override.defaultReps ?? baseExercise.defaultReps,
+          setCount: override.setCount ?? INTENSITY_CONFIG[intensity].setCount,
+        });
+      }
+
+      updatedIndices[category] = (lastIdx + pickedCount) % categoryExercises.length;
     });
 
-    return pickedExercises.slice(0, config.exerciseCount);
-  }, [intensity, routineType, lastIndices]);
+    return {
+      exercises,
+      updatedIndices,
+    };
+  }
+
+  const previewRoutine = useMemo(() => {
+    return buildGeneratedRoutine(lastIndices).exercises;
+  }, [lastIndices, intensity, volumeMode, activeCategories, previewOverrides]);
 
   const estimatedMinutes = useMemo(
     () => estimateWorkoutMinutes(previewRoutine, restSeconds),
@@ -363,6 +405,12 @@ export default function Home() {
   const isLastExercise =
     !!selectedRoutine && currentExIndex === selectedRoutine.exercises.length - 1;
   const streak = useMemo(() => calculateStreak(workoutHistory), [workoutHistory]);
+
+  useEffect(() => {
+    if (!isResting || timeLeft > 0) return;
+    moveAfterRest(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft, isResting]);
 
   function buildWorkoutExercise(exercise: RoutineExercise): WorkoutExercise {
     return {
@@ -391,39 +439,50 @@ export default function Home() {
     });
   }
 
-  function generateRollingRoutine(level: string, type: RoutineType, selectedIntensity: Intensity) {
-    const config = INTENSITY_CONFIG[selectedIntensity];
-    const targetCats = getTargetCategories(type);
-    const updatedIndices = { ...lastIndices };
-    const pickedExercises: RoutineExercise[] = [];
-
-    targetCats.forEach((cat) => {
-      const catExercises = EXERCISE_DATABASE.filter((exercise) => exercise.category === cat);
-      if (catExercises.length === 0) return;
-
-      const lastIdx = updatedIndices[cat] ?? -1;
-      const nextIdx = (lastIdx + 1) % catExercises.length;
-      const nextExercise = catExercises[nextIdx];
-
-      pickedExercises.push({
-        ...nextExercise,
-        setCount: config.setCount,
-      });
-
-      updatedIndices[cat] = nextIdx;
+  function toggleCategory(category: string) {
+    setActiveCategories((prev) => {
+      if (prev.includes(category)) {
+        return prev.filter((item) => item !== category);
+      }
+      return [...prev, category];
     });
+  }
 
-    const finalExercises = pickedExercises.slice(0, config.exerciseCount);
-    if (finalExercises.length === 0) return;
+  function handlePreviewValueEdit(
+    exerciseId: string,
+    label: string,
+    field: keyof PreviewOverride,
+    currentValue: number
+  ) {
+    const input = window.prompt(`${label} 값을 입력하세요`, String(currentValue));
+    if (input === null) return;
 
-    const workoutExercises = finalExercises.map(buildWorkoutExercise);
+    const parsed = Number(input);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+
+    setPreviewOverrides((prev) => ({
+      ...prev,
+      [exerciseId]: {
+        ...prev[exerciseId],
+        [field]: parsed,
+      },
+    }));
+  }
+
+  function generateRollingRoutine(level: string, type: RoutineType, selectedIntensity: Intensity) {
+    const { exercises, updatedIndices } = buildGeneratedRoutine(lastIndices);
+    if (exercises.length === 0) return;
+
+    const workoutExercises = exercises.map(buildWorkoutExercise);
 
     setLastIndices(updatedIndices);
     setSelectedRoutine({
-      name: `${type} ${config.displayLabel}`,
+      name: `${type} ${INTENSITY_CONFIG[selectedIntensity].displayLabel}`,
       level,
       type,
       intensity: selectedIntensity,
+      volumeMode,
+      activeCategories,
       exercises: workoutExercises,
     });
     setCurrentExIndex(0);
@@ -436,6 +495,44 @@ export default function Home() {
     setNewPRs([]);
     setLastSessionSummary(null);
     setView("WORKOUT");
+    setIsSettingsOpen(false);
+  }
+
+  function applySettingsToCurrentWorkout() {
+    if (!selectedRoutine) {
+      setIsSettingsOpen(false);
+      return;
+    }
+
+    const current = selectedRoutine.exercises[currentExIndex];
+    const completed = selectedRoutine.exercises.slice(0, currentExIndex);
+    const { exercises } = buildGeneratedRoutine(lastIndices);
+
+    const rebuilt = exercises
+      .filter(
+        (exercise) =>
+          !completed.some((done) => done.id === exercise.id) && exercise.id !== current.id
+      )
+      .map(buildWorkoutExercise);
+
+    const currentWithSets: WorkoutExercise = {
+      ...current,
+      setCount: current.setCount,
+      sets,
+    };
+
+    setSelectedRoutine({
+      ...selectedRoutine,
+      name: `${routineType} ${INTENSITY_CONFIG[intensity].displayLabel}`,
+      type: routineType,
+      intensity,
+      volumeMode,
+      activeCategories,
+      exercises: [...completed, currentWithSets, ...rebuilt],
+    });
+
+    setTimeLeft(restSeconds);
+    setIsSettingsOpen(false);
   }
 
   function syncSetValue(index: number, field: "weight" | "reps", value: number) {
@@ -589,6 +686,7 @@ export default function Home() {
     detectNewPRs(mergedExercises);
     setView("FINISH");
     setIsResting(false);
+    setIsSettingsOpen(false);
   }
 
   function resetWorkoutState() {
@@ -601,6 +699,7 @@ export default function Home() {
     setIsResting(false);
     setTimeLeft(restSeconds);
     setIsTempoOn(false);
+    setIsSettingsOpen(false);
   }
 
   function exitToHome() {
@@ -625,6 +724,8 @@ export default function Home() {
   function renderSettingsModal() {
     if (!isSettingsOpen) return null;
 
+    const categoryOptions = getDefaultCategories(routineType);
+
     return (
       <div className="fixed inset-0 z-50 flex items-end bg-black/40">
         <div className="w-full rounded-t-[2rem] bg-white p-5 shadow-2xl">
@@ -640,7 +741,7 @@ export default function Home() {
 
           <div className="space-y-5">
             <div>
-              <p className="mb-2 text-sm font-bold text-slate-500">분할</p>
+              <p className="mb-2 text-sm font-bold text-slate-500">루틴 분할</p>
               <div className="grid grid-cols-3 gap-2">
                 {(["무분할", "상체", "하체"] as RoutineType[]).map((type) => (
                   <button
@@ -659,7 +760,7 @@ export default function Home() {
             </div>
 
             <div>
-              <p className="mb-2 text-sm font-bold text-slate-500">강도</p>
+              <p className="mb-2 text-sm font-bold text-slate-500">운동 강도 설정</p>
               <div className="grid grid-cols-3 gap-2">
                 {(Object.keys(INTENSITY_CONFIG) as Intensity[]).map((key) => (
                   <button
@@ -678,13 +779,56 @@ export default function Home() {
             </div>
 
             <div>
-              <p className="mb-2 text-sm font-bold text-slate-500">휴식 시간</p>
+              <p className="mb-2 text-sm font-bold text-slate-500">운동 볼륨 설정</p>
               <div className="grid grid-cols-3 gap-2">
+                {(Object.keys(VOLUME_CONFIG) as VolumeMode[]).map((key) => (
+                  <button
+                    key={key}
+                    onClick={() => setVolumeMode(key)}
+                    className={`rounded-2xl px-4 py-3 text-sm font-bold ${
+                      volumeMode === key
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {VOLUME_CONFIG[key].displayLabel}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-slate-400">
+                볼륨을 낮추면 같은 부위의 추천 종목 수가 줄어들고, 빠진 종목은 다음 회차에
+                추천됩니다.
+              </p>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-bold text-slate-500">운동 종목 설정</p>
+              <div className="grid grid-cols-3 gap-2">
+                {categoryOptions.map((category) => {
+                  const isOn = activeCategories.includes(category);
+                  return (
+                    <button
+                      key={category}
+                      onClick={() => toggleCategory(category)}
+                      className={`rounded-2xl px-4 py-3 text-sm font-bold ${
+                        isOn ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"
+                      }`}
+                    >
+                      {category}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-bold text-slate-500">휴식 시간</p>
+              <div className="grid grid-cols-5 gap-2">
                 {[30, 45, 60, 75, 90].map((sec) => (
                   <button
                     key={sec}
                     onClick={() => setRestSeconds(sec)}
-                    className={`rounded-2xl px-4 py-3 text-sm font-bold ${
+                    className={`rounded-2xl px-3 py-3 text-sm font-bold ${
                       restSeconds === sec
                         ? "bg-slate-900 text-white"
                         : "bg-slate-100 text-slate-700"
@@ -696,6 +840,15 @@ export default function Home() {
               </div>
             </div>
           </div>
+
+          {view === "WORKOUT" && (
+            <button
+              onClick={applySettingsToCurrentWorkout}
+              className="mt-5 w-full rounded-[1.5rem] bg-slate-900 px-5 py-4 text-base font-black text-white"
+            >
+              현재 루틴에 적용
+            </button>
+          )}
         </div>
       </div>
     );
@@ -704,41 +857,44 @@ export default function Home() {
   function renderHomeView() {
     return (
       <main className="min-h-screen bg-slate-100 px-4 py-5 text-slate-900">
-        <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-          <section className="rounded-[2.5rem] bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 px-6 py-6 text-white shadow-2xl">
+        <div className="mx-auto flex w-full max-w-md flex-col gap-0">
+          <section className="rounded-t-[2.5rem] bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 px-6 py-6 text-white shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
                   Today Preview
                 </p>
-                <h1 className="mt-2 text-3xl font-black leading-none">오늘 루틴</h1>
+                <h1 className="mt-2 text-3xl font-black leading-none">오늘의 루틴</h1>
               </div>
 
               <div className="rounded-[1.75rem] bg-white/10 px-4 py-3 text-right backdrop-blur">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
-                  Time
+                  Points
                 </p>
-                <p className="mt-1 text-2xl font-black">{formatHourMin(estimatedMinutes)}</p>
+                <p className="mt-1 text-2xl font-black">{userPoints}P</p>
               </div>
             </div>
           </section>
 
-          <section className="overflow-hidden rounded-[2.5rem] bg-white shadow-xl">
+          <section className="overflow-hidden rounded-b-[2.5rem] bg-white shadow-2xl">
             <div className="border-b border-slate-200 px-5 py-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Routine Preview
-                  </p>
-                  <h2 className="mt-1 text-2xl font-black text-slate-900">
+                  <h2 className="text-2xl font-black text-slate-900">
                     {routineType} {INTENSITY_CONFIG[intensity].displayLabel}
                   </h2>
                 </div>
 
                 <div className="flex items-start gap-2">
                   <div className="text-right">
-                    <p className="text-[11px] font-semibold text-slate-400">메인 부위</p>
+                    <p className="text-[11px] font-semibold text-slate-400">예상 운동시간</p>
+                    <p className="text-sm font-bold text-slate-800">
+                      {formatHourMin(estimatedMinutes)}
+                    </p>
+
+                    <p className="mt-2 text-[11px] font-semibold text-slate-400">메인 부위</p>
                     <p className="text-sm font-bold text-slate-800">{mainCategory}</p>
+
                     <p className="mt-2 text-[11px] font-semibold text-slate-400">총 세트 수</p>
                     <p className="text-sm font-bold text-slate-800">{totalSets}</p>
                   </div>
@@ -784,36 +940,60 @@ export default function Home() {
                       </p>
                     </div>
 
-                    <div className="flex items-center justify-center text-sm font-black text-slate-900">
+                    <button
+                      onClick={() =>
+                        handlePreviewValueEdit(
+                          exercise.id,
+                          `${exercise.name} 중량`,
+                          "defaultWeight",
+                          exercise.defaultWeight
+                        )
+                      }
+                      className="flex items-center justify-center text-sm font-black text-slate-900"
+                    >
                       {exercise.defaultWeight}
-                    </div>
+                    </button>
 
-                    <div className="flex items-center justify-center text-sm font-black text-slate-900">
+                    <button
+                      onClick={() =>
+                        handlePreviewValueEdit(
+                          exercise.id,
+                          `${exercise.name} 세트 수`,
+                          "setCount",
+                          exercise.setCount
+                        )
+                      }
+                      className="flex items-center justify-center text-sm font-black text-slate-900"
+                    >
                       {exercise.setCount}
-                    </div>
+                    </button>
 
-                    <div className="flex items-center justify-center text-sm font-black text-slate-900">
+                    <button
+                      onClick={() =>
+                        handlePreviewValueEdit(
+                          exercise.id,
+                          `${exercise.name} 반복 수`,
+                          "defaultReps",
+                          exercise.defaultReps
+                        )
+                      }
+                      className="flex items-center justify-center text-sm font-black text-slate-900"
+                    >
                       {exercise.defaultReps}
-                    </div>
+                    </button>
                   </div>
                 ))}
               </div>
             </div>
           </section>
 
-          <div className="sticky bottom-4 flex flex-col gap-3">
+          <div className="sticky bottom-4 mt-4">
             <button
               onClick={() => generateRollingRoutine("초급", routineType, intensity)}
-              className="w-full rounded-[2.5rem] bg-slate-900 px-5 py-5 text-lg font-black text-white shadow-2xl transition active:scale-[0.99]"
+              disabled={previewRoutine.length === 0}
+              className="w-full rounded-[2.5rem] bg-slate-900 px-5 py-5 text-lg font-black text-white shadow-2xl transition active:scale-[0.99] disabled:bg-slate-400"
             >
               내 루틴 시작하기
-            </button>
-
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="w-full rounded-[2.5rem] bg-slate-900 px-5 py-5 text-base font-black text-white shadow-2xl transition active:scale-[0.99]"
-            >
-              루틴 변경하기
             </button>
           </div>
 
@@ -958,6 +1138,7 @@ export default function Home() {
       </main>
     );
   }
+
   function renderCheckView() {
     if (!selectedRoutine) return null;
 
