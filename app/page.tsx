@@ -987,14 +987,18 @@ export default function Home() {
             </div>
           </section>
 
-          <div className="sticky bottom-4 mt-4">
-            <button
-              onClick={() => generateRollingRoutine("초급", routineType, intensity)}
-              disabled={previewRoutine.length === 0}
-              className="w-full rounded-[2.5rem] bg-slate-900 px-5 py-5 text-lg font-black text-white shadow-2xl transition active:scale-[0.99] disabled:bg-slate-400"
-            >
-              내 루틴 시작하기
-            </button>
+          <div className="h-28" />
+
+          <div className="fixed bottom-0 left-0 right-0 z-40 bg-slate-100/95 px-4 pb-4 pt-3 backdrop-blur">
+            <div className="mx-auto w-full max-w-md">
+              <button
+                onClick={() => generateRollingRoutine("초급", routineType, intensity)}
+                disabled={previewRoutine.length === 0}
+                className="w-full rounded-[2.5rem] bg-slate-900 px-5 py-5 text-lg font-black text-white shadow-2xl transition active:scale-[0.99] disabled:bg-slate-400"
+              >
+                내 루틴 시작하기
+              </button>
+            </div>
           </div>
 
           {renderSettingsModal()}
