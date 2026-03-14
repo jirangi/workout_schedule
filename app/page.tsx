@@ -958,7 +958,6 @@ export default function Home() {
       </main>
     );
   }
-
   function renderCheckView() {
     if (!selectedRoutine) return null;
 
@@ -1007,4 +1006,99 @@ export default function Home() {
         <div className="mx-auto max-w-4xl space-y-6">
           <div className="rounded-[2rem] bg-white p-8 text-center shadow-lg">
             <div className="text-sm text-slate-500">운동 완료</div>
-            <h2 className="mt-3 text-4xl font-black
+            <h2 className="mt-3 text-4xl font-black">Great Job</h2>
+            <div className="mt-4 text-slate-500">오늘 운동이 저장되었습니다.</div>
+          </div>
+
+          {lastSessionSummary && (
+            <div className="grid gap-6 md:grid-cols-3">
+              <div className="rounded-[2rem] bg-white p-6 shadow-lg">
+                <div className="text-sm text-slate-500">총 운동 시간</div>
+                <div className="mt-2 text-2xl font-black">
+                  {formatTime(lastSessionSummary.durationSeconds)}
+                </div>
+              </div>
+
+              <div className="rounded-[2rem] bg-white p-6 shadow-lg">
+                <div className="text-sm text-slate-500">총 볼륨</div>
+                <div className="mt-2 text-2xl font-black">
+                  {lastSessionSummary.totalVolume.toLocaleString()}
+                </div>
+              </div>
+
+              <div className="rounded-[2rem] bg-white p-6 shadow-lg">
+                <div className="text-sm text-slate-500">연속 운동일</div>
+                <div className="mt-2 text-2xl font-black">{streak}일</div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="rounded-[2rem] bg-white p-6 shadow-lg">
+              <div className="text-lg font-bold">오늘 수행 운동</div>
+              <div className="mt-4 space-y-3">
+                {lastSessionSummary?.completedExercises.map((exercise) => (
+                  <div
+                    key={exercise.exerciseId}
+                    className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3"
+                  >
+                    <div>
+                      <div className="font-semibold">{exercise.exerciseName}</div>
+                      <div className="text-xs text-slate-400">{exercise.category}</div>
+                    </div>
+                    <div className="text-sm font-bold">
+                      {exercise.volume.toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-[2rem] bg-white p-6 shadow-lg">
+              <div className="text-lg font-bold">새로운 PR</div>
+              <div className="mt-4 space-y-3">
+                {newPRs.length > 0 ? (
+                  newPRs.map((pr) => (
+                    <div
+                      key={pr.exerciseId}
+                      className="rounded-2xl bg-emerald-50 px-4 py-3"
+                    >
+                      <div className="font-semibold">{pr.exerciseName}</div>
+                      <div className="mt-1 text-sm text-slate-600">
+                        최고 중량 {pr.maxWeight}kg / 최고 반복 {pr.maxReps}회
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                    이번 세션에서 갱신된 PR은 없습니다.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={exitToHome}
+            className="w-full rounded-[2.5rem] bg-slate-900 py-6 text-2xl font-black text-white shadow-2xl"
+          >
+            홈으로 돌아가기
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  switch (view) {
+    case "HOME":
+      return renderHomeView();
+    case "WORKOUT":
+      return renderWorkoutView();
+    case "CHECK":
+      return renderCheckView();
+    case "FINISH":
+      return renderFinishView();
+    default:
+      return null;
+  }
+}
