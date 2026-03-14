@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EXERCISE_DATABASE, ExerciseInfo } from "../data/exercises";
+import { requestRewardedAd } from "../lib/gpt-rewarded";
 
 type View = "HOME" | "WORKOUT" | "CHECK" | "FINISH";
 type RoutineType = "무분할" | "상체" | "하체";
@@ -275,6 +276,9 @@ export default function Home() {
   const [isResting, setIsResting] = useState(false);
   const [timeLeft, setTimeLeft] = useState(60);
   const [isTempoOn, setIsTempoOn] = useState(false);
+  
+  const [isAdLoading, setIsAdLoading] = useState(false);
+  const [adFallbackVisible, setAdFallbackVisible] = useState(false);
 
   const [lastSessionSummary, setLastSessionSummary] = useState<WorkoutSession | null>(null);
   const [newPRs, setNewPRs] = useState<PersonalRecord[]>([]);
@@ -661,6 +665,21 @@ export default function Home() {
         sets,
       };
     });
+    async function handleRewardAd() {
+      setIsAdLoading(true);
+      setAdFallbackVisible(false);
+    
+      const result = await requestRewardedAd("/123456789/example_rewarded");
+    
+      setIsAdLoading(false);
+    
+      if (result.status === "granted") {
+        moveAfterRest(true);
+        return;
+      }
+    
+      setAdFallbackVisible(true);
+    }
 
     const completedExercises = mergedExercises.map((exercise) => ({
       exerciseId: exercise.id,
@@ -1138,7 +1157,7 @@ export default function Home() {
                       : "bg-slate-200 text-slate-400"
                   }`}
                 >
-                  +30P
+                  {isAdLoading ? "광고 불러오는 중..." : "+30P"}
                 </button>
                 <button
                   onClick={() => moveAfterRest(false)}
@@ -1147,6 +1166,27 @@ export default function Home() {
                   SKIP
                 </button>
               </div>
+              {adFallbackVisible && (
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-center">
+                  <div className="text-sm font-bold text-slate-700">
+                    광고 없음
+                  </div>
+              
+                  <div className="mt-2 text-sm text-slate-500">
+                    현재 표시 가능한 광고가 없습니다.
+                  </div>
+              
+                  <button
+                    onClick={() => {
+                      setAdFallbackVisible(false);
+                      moveAfterRest(false);
+                    }}
+                    className="mt-4 rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white"
+                  >
+                    다음으로 진행
+                  </button>
+                </div>
+              )}
               <div className="mt-4 text-center text-xs text-slate-400">
                 오늘 {rewardStatus.count} / {DAILY_REWARD_LIMIT}
               </div>
