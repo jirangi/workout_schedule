@@ -1159,6 +1159,7 @@ export default function Home() {
                 >
                   {isAdLoading ? "광고 불러오는 중..." : "+30P"}
                 </button>
+              
                 <button
                   onClick={() => moveAfterRest(false)}
                   className="rounded-2xl bg-slate-900 px-5 py-4 text-lg font-bold text-white"
@@ -1166,16 +1167,13 @@ export default function Home() {
                   SKIP
                 </button>
               </div>
+              
               {adFallbackVisible && (
                 <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-center">
-                  <div className="text-sm font-bold text-slate-700">
-                    광고 없음
-                  </div>
-              
+                  <div className="text-sm font-bold text-slate-700">광고 없음</div>
                   <div className="mt-2 text-sm text-slate-500">
                     현재 표시 가능한 광고가 없습니다.
                   </div>
-              
                   <button
                     onClick={() => {
                       setAdFallbackVisible(false);
