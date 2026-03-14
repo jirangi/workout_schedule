@@ -886,22 +886,38 @@ export default function Home() {
                 </div>
 
                 <div className="flex items-start gap-2">
-                  <div className="text-right">
-                    <p className="text-[11px] font-semibold text-slate-400">예상 운동시간</p>
-                    <p className="text-sm font-bold text-slate-800">
-                      {formatHourMin(estimatedMinutes)}
-                    </p>
-
-                    <p className="mt-2 text-[11px] font-semibold text-slate-400">메인 부위</p>
-                    <p className="text-sm font-bold text-slate-800">{mainCategory}</p>
-
-                    <p className="mt-2 text-[11px] font-semibold text-slate-400">총 세트 수</p>
-                    <p className="text-sm font-bold text-slate-800">{totalSets}</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="min-w-[72px] rounded-2xl bg-slate-50 px-3 py-2 text-center">
+                      <p className="text-[10px] font-semibold tracking-tight text-slate-400">
+                        예상 운동시간
+                      </p>
+                      <p className="mt-1 text-sm font-black text-slate-800">
+                        {formatHourMin(estimatedMinutes)}
+                      </p>
+                    </div>
+                
+                    <div className="min-w-[72px] rounded-2xl bg-slate-50 px-3 py-2 text-center">
+                      <p className="text-[10px] font-semibold tracking-tight text-slate-400">
+                        메인 부위
+                      </p>
+                      <p className="mt-1 text-sm font-black text-slate-800">
+                        {mainCategory}
+                      </p>
+                    </div>
+                
+                    <div className="min-w-[72px] rounded-2xl bg-slate-50 px-3 py-2 text-center">
+                      <p className="text-[10px] font-semibold tracking-tight text-slate-400">
+                        총 세트 수
+                      </p>
+                      <p className="mt-1 text-sm font-black text-slate-800">
+                        {totalSets}
+                      </p>
+                    </div>
                   </div>
-
+                
                   <button
                     onClick={() => setIsSettingsOpen(true)}
-                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-xl shadow-sm"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-xl shadow-sm"
                     aria-label="설정 열기"
                   >
                     ⚙️
