@@ -199,15 +199,14 @@ function getTargetCategories(type: RoutineType) {
   return ["가슴", "등", "하체", "어깨", "복근"];
 }
 
-function estimateWorkoutMinutes(exercises: RoutineExercise[], intensity: Intensity) {
-  const config = INTENSITY_CONFIG[intensity];
+function estimateWorkoutMinutes(exercises: RoutineExercise[], restSeconds: number) {
   const setSeconds = exercises.reduce((acc, ex) => {
     const estimatedSetTime = ex.defaultReps >= 15 ? 45 : 35;
     return acc + estimatedSetTime * ex.setCount;
   }, 0);
 
   const totalSets = exercises.reduce((acc, ex) => acc + ex.setCount, 0);
-  const totalRestSeconds = Math.max(0, totalSets - 1) * config.restSeconds;
+  const totalRestSeconds = Math.max(0, totalSets - 1) * restSeconds;
 
   return (setSeconds + totalRestSeconds) / 60;
 }
@@ -224,10 +223,8 @@ function getMainCategory(exercises: RoutineExercise[]) {
 }
 
 export default function Home() {
-  // View state
   const [view, setView] = useState<View>("HOME");
 
-  // Persistence state
   const [userPoints, setUserPoints] = useState(0);
   const [rewardStatus, setRewardStatus] = useState<RewardStatus>({
     date: getTodayKey(),
@@ -237,11 +234,11 @@ export default function Home() {
   const [workoutHistory, setWorkoutHistory] = useState<WorkoutSession[]>([]);
   const [personalRecords, setPersonalRecords] = useState<PersonalRecord[]>([]);
 
-  // Home control state
   const [routineType, setRoutineType] = useState<RoutineType>("상체");
   const [intensity, setIntensity] = useState<Intensity>("NORMAL");
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [restSeconds, setRestSeconds] = useState(INTENSITY_CONFIG.NORMAL.restSeconds);
 
-  // Routine/session state
   const [selectedRoutine, setSelectedRoutine] = useState<SelectedRoutine | null>(null);
   const [currentExIndex, setCurrentExIndex] = useState(0);
   const [sets, setSets] = useState<SetLog[]>([]);
@@ -249,18 +246,19 @@ export default function Home() {
   const [workoutStartTime, setWorkoutStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
 
-  // Rest/support state
   const [isResting, setIsResting] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(INTENSITY_CONFIG.NORMAL.restSeconds);
+  const [timeLeft, setTimeLeft] = useState(60);
   const [isTempoOn, setIsTempoOn] = useState(false);
 
-  // Finish/report state
   const [lastSessionSummary, setLastSessionSummary] = useState<WorkoutSession | null>(null);
   const [newPRs, setNewPRs] = useState<PersonalRecord[]>([]);
 
   const speechRef = useRef<SpeechSynthesis | null>(null);
 
-  // Persistence load
+  useEffect(() => {
+    setRestSeconds(INTENSITY_CONFIG[intensity].restSeconds);
+  }, [intensity]);
+
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     const parsed = saved ? (JSON.parse(saved) as Partial<UserPersistence>) : null;
@@ -277,7 +275,6 @@ export default function Home() {
     }
   }, []);
 
-  // Persistence save
   useEffect(() => {
     const dataToSave: UserPersistence = {
       userPoints,
@@ -290,7 +287,6 @@ export default function Home() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
   }, [userPoints, rewardStatus, lastIndices, workoutHistory, personalRecords]);
 
-  // Workout elapsed timer
   useEffect(() => {
     if (view !== "WORKOUT" || !workoutStartTime) return;
 
@@ -301,7 +297,6 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [view, workoutStartTime]);
 
-  // Rest timer
   useEffect(() => {
     if (!isResting) return;
 
@@ -318,7 +313,6 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [isResting]);
 
-  // Auto move when rest ends
   useEffect(() => {
     if (!isResting || timeLeft > 0) return;
     moveAfterRest(false);
@@ -348,8 +342,8 @@ export default function Home() {
   }, [intensity, routineType, lastIndices]);
 
   const estimatedMinutes = useMemo(
-    () => estimateWorkoutMinutes(previewRoutine, intensity),
-    [previewRoutine, intensity]
+    () => estimateWorkoutMinutes(previewRoutine, restSeconds),
+    [previewRoutine, restSeconds]
   );
 
   const totalSets = useMemo(
@@ -364,7 +358,6 @@ export default function Home() {
     return selectedRoutine.exercises[currentExIndex] ?? null;
   }, [selectedRoutine, currentExIndex]);
 
-  const activeIntensity = selectedRoutine?.intensity ?? intensity;
   const canEarnReward = rewardStatus.count < DAILY_REWARD_LIMIT;
   const isLastSet = currentSetIndex === sets.length - 1;
   const isLastExercise =
@@ -439,7 +432,7 @@ export default function Home() {
     setWorkoutStartTime(Date.now());
     setElapsedTime(0);
     setIsResting(false);
-    setTimeLeft(config.restSeconds);
+    setTimeLeft(restSeconds);
     setNewPRs([]);
     setLastSessionSummary(null);
     setView("WORKOUT");
@@ -481,7 +474,7 @@ export default function Home() {
     });
 
     setIsResting(true);
-    setTimeLeft(INTENSITY_CONFIG[activeIntensity].restSeconds);
+    setTimeLeft(restSeconds);
   }
 
   function earnReward() {
@@ -501,7 +494,7 @@ export default function Home() {
 
     persistCurrentExerciseSets(sets);
     setIsResting(false);
-    setTimeLeft(INTENSITY_CONFIG[activeIntensity].restSeconds);
+    setTimeLeft(restSeconds);
 
     if (!isLastSet) {
       setCurrentSetIndex((prev) => prev + 1);
@@ -606,7 +599,7 @@ export default function Home() {
     setWorkoutStartTime(null);
     setElapsedTime(0);
     setIsResting(false);
-    setTimeLeft(INTENSITY_CONFIG[intensity].restSeconds);
+    setTimeLeft(restSeconds);
     setIsTempoOn(false);
   }
 
@@ -629,6 +622,85 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentExIndex, isTempoOn, view]);
 
+  function renderSettingsModal() {
+    if (!isSettingsOpen) return null;
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-end bg-black/40">
+        <div className="w-full rounded-t-[2rem] bg-white p-5 shadow-2xl">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-xl font-black text-slate-900">운동 설정</h3>
+            <button
+              onClick={() => setIsSettingsOpen(false)}
+              className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700"
+            >
+              닫기
+            </button>
+          </div>
+
+          <div className="space-y-5">
+            <div>
+              <p className="mb-2 text-sm font-bold text-slate-500">분할</p>
+              <div className="grid grid-cols-3 gap-2">
+                {(["무분할", "상체", "하체"] as RoutineType[]).map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setRoutineType(type)}
+                    className={`rounded-2xl px-4 py-3 text-sm font-bold ${
+                      routineType === type
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-bold text-slate-500">강도</p>
+              <div className="grid grid-cols-3 gap-2">
+                {(Object.keys(INTENSITY_CONFIG) as Intensity[]).map((key) => (
+                  <button
+                    key={key}
+                    onClick={() => setIntensity(key)}
+                    className={`rounded-2xl px-4 py-3 text-sm font-bold ${
+                      intensity === key
+                        ? "bg-blue-600 text-white"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {INTENSITY_CONFIG[key].displayLabel}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-bold text-slate-500">휴식 시간</p>
+              <div className="grid grid-cols-3 gap-2">
+                {[30, 45, 60, 75, 90].map((sec) => (
+                  <button
+                    key={sec}
+                    onClick={() => setRestSeconds(sec)}
+                    className={`rounded-2xl px-4 py-3 text-sm font-bold ${
+                      restSeconds === sec
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {sec}s
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderHomeView() {
     return (
       <main className="min-h-screen bg-slate-100 px-4 py-5 text-slate-900">
@@ -640,90 +712,20 @@ export default function Home() {
                   Today Preview
                 </p>
                 <h1 className="mt-2 text-3xl font-black leading-none">오늘 루틴</h1>
-                <p className="mt-2 text-sm text-slate-300">
-                  운동 수, 추천 중량, 예상 시간을 한 번에 확인
-                </p>
               </div>
 
               <div className="rounded-[1.75rem] bg-white/10 px-4 py-3 text-right backdrop-blur">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
-                  Points
-                </p>
-                <p className="mt-1 text-2xl font-black">{userPoints}P</p>
-              </div>
-            </div>
-
-            <div className="mt-5 grid grid-cols-3 gap-3">
-              <div className="rounded-[1.6rem] bg-white/10 px-4 py-3 backdrop-blur">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-                  운동 수
-                </p>
-                <p className="mt-1 text-2xl font-black">{previewRoutine.length}</p>
-              </div>
-
-              <div className="rounded-[1.6rem] bg-white/10 px-4 py-3 backdrop-blur">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-                  예상 시간
+                  Time
                 </p>
                 <p className="mt-1 text-2xl font-black">{formatHourMin(estimatedMinutes)}</p>
-              </div>
-
-              <div className="rounded-[1.6rem] bg-white/10 px-4 py-3 backdrop-blur">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-                  휴식
-                </p>
-                <p className="mt-1 text-2xl font-black">
-                  {INTENSITY_CONFIG[intensity].restSeconds}s
-                </p>
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-[2.5rem] bg-white p-4 shadow-xl">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="mb-3 px-1 text-sm font-bold text-slate-500">분할</p>
-                <div className="grid grid-cols-1 gap-2">
-                  {(["무분할", "상체", "하체"] as RoutineType[]).map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => setRoutineType(type)}
-                      className={`rounded-[1.3rem] px-4 py-3 text-sm font-bold transition ${
-                        routineType === type
-                          ? "bg-slate-900 text-white shadow-lg"
-                          : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      {type}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="mb-3 px-1 text-sm font-bold text-slate-500">강도</p>
-                <div className="grid grid-cols-1 gap-2">
-                  {(Object.keys(INTENSITY_CONFIG) as Intensity[]).map((key) => (
-                    <button
-                      key={key}
-                      onClick={() => setIntensity(key)}
-                      className={`rounded-[1.3rem] px-4 py-3 text-sm font-bold transition ${
-                        intensity === key
-                          ? "bg-blue-600 text-white shadow-lg"
-                          : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      {INTENSITY_CONFIG[key].displayLabel}
-                    </button>
-                  ))}
-                </div>
               </div>
             </div>
           </section>
 
           <section className="overflow-hidden rounded-[2.5rem] bg-white shadow-xl">
             <div className="border-b border-slate-200 px-5 py-4">
-              <div className="flex items-end justify-between gap-3">
+              <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                     Routine Preview
@@ -733,11 +735,21 @@ export default function Home() {
                   </h2>
                 </div>
 
-                <div className="text-right">
-                  <p className="text-xs font-semibold text-slate-400">회당 적립</p>
-                  <p className="text-sm font-bold text-slate-700">
-                    30P · 오늘 {rewardStatus.count}/{DAILY_REWARD_LIMIT}
-                  </p>
+                <div className="flex items-start gap-2">
+                  <div className="text-right">
+                    <p className="text-[11px] font-semibold text-slate-400">메인 부위</p>
+                    <p className="text-sm font-bold text-slate-800">{mainCategory}</p>
+                    <p className="mt-2 text-[11px] font-semibold text-slate-400">총 세트 수</p>
+                    <p className="text-sm font-bold text-slate-800">{totalSets}</p>
+                  </div>
+
+                  <button
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-xl shadow-sm"
+                    aria-label="설정 열기"
+                  >
+                    ⚙️
+                  </button>
                 </div>
               </div>
             </div>
@@ -789,30 +801,23 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="grid grid-cols-2 gap-3">
-            <div className="rounded-[2rem] bg-white px-5 py-4 shadow-lg">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-                메인 부위
-              </p>
-              <p className="mt-2 text-lg font-black text-slate-900">{mainCategory}</p>
-            </div>
-
-            <div className="rounded-[2rem] bg-white px-5 py-4 shadow-lg">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-                총 세트 수
-              </p>
-              <p className="mt-2 text-lg font-black text-slate-900">{totalSets}</p>
-            </div>
-          </section>
-
-          <div className="sticky bottom-4">
+          <div className="sticky bottom-4 flex flex-col gap-3">
             <button
               onClick={() => generateRollingRoutine("초급", routineType, intensity)}
               className="w-full rounded-[2.5rem] bg-slate-900 px-5 py-5 text-lg font-black text-white shadow-2xl transition active:scale-[0.99]"
             >
               내 루틴 시작하기
             </button>
+
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="w-full rounded-[2.5rem] bg-slate-900 px-5 py-5 text-base font-black text-white shadow-2xl transition active:scale-[0.99]"
+            >
+              루틴 변경하기
+            </button>
           </div>
+
+          {renderSettingsModal()}
         </div>
       </main>
     );
@@ -832,7 +837,18 @@ export default function Home() {
               >
                 ROUTINE LIST
               </button>
-              <div className="text-lg font-bold">{formatTime(elapsedTime)}</div>
+
+              <div className="flex items-center gap-2">
+                <div className="text-lg font-bold">{formatTime(elapsedTime)}</div>
+                <button
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-lg"
+                  aria-label="운동 설정 열기"
+                >
+                  ⚙️
+                </button>
+              </div>
+
               <button onClick={exitToHome} className="text-sm font-semibold text-rose-500">
                 EXIT
               </button>
@@ -936,6 +952,8 @@ export default function Home() {
               </div>
             </div>
           )}
+
+          {renderSettingsModal()}
         </div>
       </main>
     );
@@ -989,97 +1007,4 @@ export default function Home() {
         <div className="mx-auto max-w-4xl space-y-6">
           <div className="rounded-[2rem] bg-white p-8 text-center shadow-lg">
             <div className="text-sm text-slate-500">운동 완료</div>
-            <h2 className="mt-3 text-4xl font-black">Great Job</h2>
-            <div className="mt-4 text-slate-500">오늘 운동이 저장되었습니다.</div>
-          </div>
-
-          {lastSessionSummary && (
-            <div className="grid gap-6 md:grid-cols-3">
-              <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-                <div className="text-sm text-slate-500">총 운동 시간</div>
-                <div className="mt-2 text-2xl font-black">
-                  {formatTime(lastSessionSummary.durationSeconds)}
-                </div>
-              </div>
-              <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-                <div className="text-sm text-slate-500">총 볼륨</div>
-                <div className="mt-2 text-2xl font-black">
-                  {lastSessionSummary.totalVolume.toLocaleString()}
-                </div>
-              </div>
-              <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-                <div className="text-sm text-slate-500">연속 운동일</div>
-                <div className="mt-2 text-2xl font-black">{streak}일</div>
-              </div>
-            </div>
-          )}
-
-          <div className="grid gap-6 md:grid-cols-2">
-            <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-              <div className="text-lg font-bold">오늘 수행 운동</div>
-              <div className="mt-4 space-y-3">
-                {lastSessionSummary?.completedExercises.map((exercise) => (
-                  <div
-                    key={exercise.exerciseId}
-                    className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3"
-                  >
-                    <div>
-                      <div className="font-semibold">{exercise.exerciseName}</div>
-                      <div className="text-xs text-slate-400">{exercise.category}</div>
-                    </div>
-                    <div className="text-sm font-bold">
-                      {exercise.volume.toLocaleString()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-              <div className="text-lg font-bold">새로운 PR</div>
-              <div className="mt-4 space-y-3">
-                {newPRs.length > 0 ? (
-                  newPRs.map((pr) => (
-                    <div
-                      key={pr.exerciseId}
-                      className="rounded-2xl bg-emerald-50 px-4 py-3"
-                    >
-                      <div className="font-semibold">{pr.exerciseName}</div>
-                      <div className="mt-1 text-sm text-slate-600">
-                        최고 중량 {pr.maxWeight}kg / 최고 반복 {pr.maxReps}회
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                    이번 세션에서 갱신된 PR은 없습니다.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <button
-            onClick={exitToHome}
-            className="w-full rounded-[2.5rem] bg-slate-900 py-6 text-2xl font-black text-white shadow-2xl"
-          >
-            홈으로 돌아가기
-          </button>
-        </div>
-      </main>
-    );
-  }
-
-  switch (view) {
-    case "HOME":
-      return renderHomeView();
-    case "WORKOUT":
-      return renderWorkoutView();
-    case "CHECK":
-      return renderCheckView();
-    case "FINISH":
-      return renderFinishView();
-    default:
-      return null;
-  }
-}
+            <h2 className="mt-3 text-4xl font-black
