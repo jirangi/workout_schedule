@@ -419,8 +419,14 @@ export default function Page() {
   const estimatedMinutes = Math.max(15, totalSets * 3);
   const mainCategory = previewRoutine[0]?.category ?? "-";
 
-  const currentExercise = session?.exercises[session.currentExerciseIndex] ?? null;
-  const currentSet = currentExercise?.sets[session.currentSetIndex] ?? null;
+  const currentExercise =
+  session ? session.exercises[session.currentExerciseIndex] ?? null : null;
+
+  const currentSet =
+    session && currentExercise
+      ? currentExercise.sets[session.currentSetIndex] ?? null
+      : null;
+  
   const hasActiveSession = !!session;
 
   function calculateStreak(history: SessionSummary[]) {
