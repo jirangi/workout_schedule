@@ -4,227 +4,151 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { EXERCISE_DATABASE, ExerciseInfo } from "../data/exercises";
 
 type View = "HOME" | "WORKOUT" | "CHECK" | "FINISH";
-
-interface SetLog {
-  id: number;
-  weight: number;
-  reps: number;
-  isEdited: boolean;
-  isDone: boolean;
-  completedAt?: string;
-}
-
-interface WorkoutExercise {
-  exerciseId: string;
-  name: string;
-  category: string;
-  subTarget: string;
-  equipment: string;
-  defaultWeight: number;
-  defaultReps: number;
-  sets: SetLog[];
-}
-
-interface SelectedRoutine {
-  name: string;
-  level: string;
-  type: string;
-  exercises: WorkoutExercise[];
-}
-
-interface PersonalRecord {
-  exerciseId: string;
-  exerciseName: string;
-  maxWeight: number;
-  maxReps: number;
-  updatedAt: string;
-}
-
-interface WorkoutSession {
-  id: string;
-  routineName: string;
-  startedAt: string;
-  finishedAt: string;
-  durationSeconds: number;
-  totalVolume: number;
-  completedExercises: Array<{
-    exerciseId: string;
-    exerciseName: string;
-    category: string;
-    volume: number;
-  }>;
-}
-
-interface RewardStatus {
-  date: string;
-  count: number;
-}
+type RoutineType = "무분할" | "상체" | "하체";
+type Intensity = "LIGHT" | "NORMAL" | "HARD";
 
 interface UserPersistence {
   userPoints: number;
-  rewardStatus: RewardStatus;
+  rewardStatus: {
+    date: string;
+    count: number;
+  };
   lastIndices: Record<string, number>;
-  workoutHistory: WorkoutSession[];
-  personalRecords: PersonalRecord[];
+}
+
+interface RoutineExercise extends ExerciseInfo {
+  setCount: number;
 }
 
 const STORAGE_KEY = "MINIMAL_FIT_DATA";
-const DEFAULT_REST_SECONDS = 60;
 const DAILY_REWARD_LIMIT = 2;
 const REWARD_AMOUNT = 30;
 
-const DEFAULT_PERSISTENCE: UserPersistence = {
-  userPoints: 0,
-  rewardStatus: {
-    date: "",
-    count: 0,
+const INTENSITY_CONFIG: Record<
+  Intensity,
+  {
+    label: string;
+    exerciseCount: number;
+    setCount: number;
+    restSeconds: number;
+  }
+> = {
+  LIGHT: {
+    label: "Light",
+    exerciseCount: 4,
+    setCount: 2,
+    restSeconds: 45,
   },
-  lastIndices: {},
-  workoutHistory: [],
-  personalRecords: [],
+  NORMAL: {
+    label: "Normal",
+    exerciseCount: 6,
+    setCount: 3,
+    restSeconds: 60,
+  },
+  HARD: {
+    label: "Hard",
+    exerciseCount: 8,
+    setCount: 4,
+    restSeconds: 75,
+  },
 };
 
 function getTodayKey() {
   return new Date().toLocaleDateString();
 }
 
-function normalizePersistence(data: Partial<UserPersistence> | null): UserPersistence {
-  const today = getTodayKey();
-  const rewardStatus =
-    data?.rewardStatus?.date === today
-      ? data.rewardStatus
-      : {
-          date: today,
-          count: 0,
-        };
-
-  return {
-    userPoints: data?.userPoints ?? 0,
-    rewardStatus,
-    lastIndices: data?.lastIndices ?? {},
-    workoutHistory: data?.workoutHistory ?? [],
-    personalRecords: data?.personalRecords ?? [],
-  };
-}
-
-function createInitialSets(exercise: Pick<ExerciseInfo, "defaultWeight" | "defaultReps">): SetLog[] {
-  return Array.from({ length: 3 }, (_, i) => ({
-    id: i + 1,
-    weight: exercise.defaultWeight,
-    reps: exercise.defaultReps,
-    isEdited: false,
-    isDone: false,
-  }));
-}
-
-function formatTime(totalSeconds: number) {
-  const min = Math.floor(totalSeconds / 60);
-  const sec = totalSeconds % 60;
+function formatTime(seconds: number) {
+  const min = Math.floor(seconds / 60);
+  const sec = seconds % 60;
   return `${min}:${sec.toString().padStart(2, "0")}`;
 }
 
-function calculateExerciseVolume(sets: SetLog[]) {
-  return sets.reduce((sum, set) => sum + set.weight * set.reps, 0);
+function formatEstimatedMinutes(totalMinutes: number) {
+  return `${Math.round(totalMinutes)} min`;
 }
 
-function calculateStreak(history: WorkoutSession[]) {
-  if (history.length === 0) return 0;
+function getTargetCategories(type: RoutineType) {
+  if (type === "상체") return ["가슴", "등", "어깨", "팔"];
+  if (type === "하체") return ["하체", "복근"];
+  return ["가슴", "등", "하체", "어깨", "복근"];
+}
 
-  const uniqueDays = Array.from(
-    new Set(
-      history.map((session) => {
-        const date = new Date(session.finishedAt);
-        return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-      })
-    )
-  ).sort((a, b) => b - a);
+function estimateWorkoutMinutes(
+  exercises: RoutineExercise[],
+  intensity: Intensity
+): number {
+  const config = INTENSITY_CONFIG[intensity];
+  const setSeconds = exercises.reduce((acc, ex) => {
+    const estimatedSetTime = ex.defaultReps >= 15 ? 45 : 35;
+    return acc + estimatedSetTime * ex.setCount;
+  }, 0);
 
-  const today = new Date();
-  const todayStamp = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  const oneDay = 24 * 60 * 60 * 1000;
+  const totalSets = exercises.reduce((acc, ex) => acc + ex.setCount, 0);
+  const totalRestSeconds = Math.max(0, totalSets - 1) * config.restSeconds;
 
-  if (uniqueDays[0] !== todayStamp && uniqueDays[0] !== todayStamp - oneDay) {
-    return 0;
-  }
-
-  let streak = 1;
-  for (let i = 1; i < uniqueDays.length; i++) {
-    const prev = uniqueDays[i - 1];
-    const current = uniqueDays[i];
-    if (prev - current === oneDay) {
-      streak += 1;
-    } else {
-      break;
-    }
-  }
-
-  return streak;
+  return (setSeconds + totalRestSeconds) / 60;
 }
 
 export default function Home() {
-  // 1) View state
   const [view, setView] = useState<View>("HOME");
+  const [selectedRoutine, setSelectedRoutine] = useState<{
+    name: string;
+    exercises: RoutineExercise[];
+  } | null>(null);
 
-  // 2) Persistence state
   const [userPoints, setUserPoints] = useState(0);
-  const [rewardStatus, setRewardStatus] = useState<RewardStatus>({
+  const [rewardStatus, setRewardStatus] = useState({
     date: getTodayKey(),
     count: 0,
   });
   const [lastIndices, setLastIndices] = useState<Record<string, number>>({});
-  const [workoutHistory, setWorkoutHistory] = useState<WorkoutSession[]>([]);
-  const [personalRecords, setPersonalRecords] = useState<PersonalRecord[]>([]);
 
-  // 3) Routine/session state
-  const [selectedRoutine, setSelectedRoutine] = useState<SelectedRoutine | null>(null);
-  const [currentExIndex, setCurrentExIndex] = useState(0);
-  const [sets, setSets] = useState<SetLog[]>([]);
-  const [currentSetIndex, setCurrentSetIndex] = useState(0);
+  const [routineType, setRoutineType] = useState<RoutineType>("무분할");
+  const [intensity, setIntensity] = useState<Intensity>("NORMAL");
+
   const [workoutStartTime, setWorkoutStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
-
-  // 4) Rest/support state
+  const [currentExIndex, setCurrentExIndex] = useState(0);
+  const [sets, setSets] = useState<
+    { id: number; weight: number; reps: number; isEdited: boolean }[]
+  >([]);
+  const [currentSetIndex, setCurrentSetIndex] = useState(0);
   const [isResting, setIsResting] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(DEFAULT_REST_SECONDS);
+  const [timeLeft, setTimeLeft] = useState(60);
   const [isTempoOn, setIsTempoOn] = useState(false);
-
-  // 5) Finish/report state
-  const [lastSessionSummary, setLastSessionSummary] = useState<WorkoutSession | null>(null);
-  const [newPRs, setNewPRs] = useState<PersonalRecord[]>([]);
 
   const speechRef = useRef<SpeechSynthesis | null>(null);
 
-  // Persistence load
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    const parsed = saved ? (JSON.parse(saved) as Partial<UserPersistence>) : null;
-    const normalized = normalizePersistence(parsed);
 
-    setUserPoints(normalized.userPoints);
-    setRewardStatus(normalized.rewardStatus);
-    setLastIndices(normalized.lastIndices);
-    setWorkoutHistory(normalized.workoutHistory);
-    setPersonalRecords(normalized.personalRecords);
+    if (saved) {
+      const parsed: UserPersistence = JSON.parse(saved);
+      setUserPoints(parsed.userPoints ?? 0);
+      setLastIndices(parsed.lastIndices || {});
+
+      const today = getTodayKey();
+      setRewardStatus(
+        parsed.rewardStatus?.date === today
+          ? parsed.rewardStatus
+          : { date: today, count: 0 }
+      );
+    }
 
     if (typeof window !== "undefined") {
       speechRef.current = window.speechSynthesis;
     }
   }, []);
 
-  // Persistence save
   useEffect(() => {
     const dataToSave: UserPersistence = {
       userPoints,
       rewardStatus,
       lastIndices,
-      workoutHistory,
-      personalRecords,
     };
-
     localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
-  }, [userPoints, rewardStatus, lastIndices, workoutHistory, personalRecords]);
+  }, [userPoints, rewardStatus, lastIndices]);
 
-  // Workout elapsed timer
   useEffect(() => {
     if (view !== "WORKOUT" || !workoutStartTime) return;
 
@@ -235,7 +159,6 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [view, workoutStartTime]);
 
-  // Rest timer
   useEffect(() => {
     if (!isResting) return;
 
@@ -252,372 +175,326 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [isResting]);
 
-  // Auto move when rest ends
-  useEffect(() => {
-    if (!isResting || timeLeft > 0) return;
-    moveAfterRest(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeLeft, isResting]);
+  const previewRoutine = useMemo(() => {
+    const config = INTENSITY_CONFIG[intensity];
+    const targetCategories = getTargetCategories(routineType);
+    const picked: RoutineExercise[] = [];
 
-  const currentExercise = useMemo(() => {
-    if (!selectedRoutine) return null;
-    return selectedRoutine.exercises[currentExIndex] ?? null;
-  }, [selectedRoutine, currentExIndex]);
+    targetCategories.forEach((cat) => {
+      const categoryExercises = EXERCISE_DATABASE.filter(
+        (exercise) => exercise.category === cat
+      );
 
-  const canEarnReward = rewardStatus.count < DAILY_REWARD_LIMIT;
-  const isLastSet = currentSetIndex === sets.length - 1;
-  const isLastExercise =
-    !!selectedRoutine && currentExIndex === selectedRoutine.exercises.length - 1;
-  const todayRoutineLabel = selectedRoutine?.name ?? "아직 시작하지 않음";
-  const streak = useMemo(() => calculateStreak(workoutHistory), [workoutHistory]);
+      if (categoryExercises.length === 0) return;
 
-  function buildWorkoutExercise(exercise: ExerciseInfo): WorkoutExercise {
-    return {
-      exerciseId: exercise.id,
-      name: exercise.name,
-      category: exercise.category,
-      subTarget: exercise.subTarget,
-      equipment: exercise.equipment,
-      defaultWeight: exercise.defaultWeight,
-      defaultReps: exercise.defaultReps,
-      sets: createInitialSets(exercise),
-    };
-  }
+      const lastIdx = lastIndices[cat] ?? -1;
+      const nextIdx = (lastIdx + 1) % categoryExercises.length;
+      const nextExercise = categoryExercises[nextIdx];
 
-  function generateRollingRoutine(level: string, type: string) {
-    const count = level === "초급" ? 4 : level === "중급" ? 6 : 8;
+      picked.push({
+        ...nextExercise,
+        setCount: config.setCount,
+      });
+    });
 
-    const targetCats =
-      type === "상체"
-        ? ["가슴", "등", "어깨", "팔"]
-        : type === "하체"
-        ? ["하체", "복근"]
-        : ["가슴", "등", "하체", "어깨"];
+    return picked.slice(0, config.exerciseCount);
+  }, [intensity, routineType, lastIndices]);
 
+  const estimatedMinutes = useMemo(() => {
+    return estimateWorkoutMinutes(previewRoutine, intensity);
+  }, [previewRoutine, intensity]);
+
+  const currentExercise = selectedRoutine?.exercises[currentExIndex];
+
+  const generateRollingRoutine = () => {
+    const config = INTENSITY_CONFIG[intensity];
+    const targetCategories = getTargetCategories(routineType);
+
+    const newExercises: RoutineExercise[] = [];
     const updatedIndices = { ...lastIndices };
-    const pickedExercises: WorkoutExercise[] = [];
 
-    targetCats.forEach((cat) => {
-      const catExercises = EXERCISE_DATABASE.filter((exercise) => exercise.category === cat);
-      if (catExercises.length === 0) return;
+    targetCategories.forEach((cat) => {
+      const categoryExercises = EXERCISE_DATABASE.filter(
+        (exercise) => exercise.category === cat
+      );
+
+      if (categoryExercises.length === 0) return;
 
       const lastIdx = updatedIndices[cat] ?? -1;
-      const nextIdx = (lastIdx + 1) % catExercises.length;
-      const nextExercise = catExercises[nextIdx];
+      const nextIdx = (lastIdx + 1) % categoryExercises.length;
+      const nextExercise = categoryExercises[nextIdx];
 
-      pickedExercises.push(buildWorkoutExercise(nextExercise));
+      newExercises.push({
+        ...nextExercise,
+        setCount: config.setCount,
+      });
+
       updatedIndices[cat] = nextIdx;
     });
 
-    const finalExercises = pickedExercises.slice(0, count);
-
-    if (finalExercises.length === 0) return;
+    const finalExercises = newExercises.slice(0, config.exerciseCount);
 
     setLastIndices(updatedIndices);
     setSelectedRoutine({
-      name: `${level} ${type}`,
-      level,
-      type,
+      name: `${routineType} ${config.label}`,
       exercises: finalExercises,
     });
-    setCurrentExIndex(0);
-    setCurrentSetIndex(0);
-    setSets(finalExercises[0].sets);
     setWorkoutStartTime(Date.now());
     setElapsedTime(0);
-    setIsResting(false);
-    setTimeLeft(DEFAULT_REST_SECONDS);
-    setNewPRs([]);
-    setLastSessionSummary(null);
-    setView("WORKOUT");
-  }
-
-  function syncSetValue(index: number, field: "weight" | "reps", value: number) {
-    setSets((prev) => {
-      const next = prev.map((set) => ({ ...set }));
-      next[index][field] = value;
-      next[index].isEdited = true;
-
-      if (index === 0) {
-        for (let i = 1; i < next.length; i++) {
-          if (!next[i].isEdited) {
-            next[i][field] = value;
-          }
-        }
-      }
-
-      return next;
-    });
-  }
-
-  function markCurrentSetDone() {
-    setSets((prev) =>
-      prev.map((set, index) =>
-        index === currentSetIndex
-          ? {
-              ...set,
-              isDone: true,
-              completedAt: new Date().toISOString(),
-            }
-          : set
-      )
-    );
-    setIsResting(true);
-    setTimeLeft(DEFAULT_REST_SECONDS);
-  }
-
-  function earnReward() {
-    if (!canEarnReward) return;
-
-    setUserPoints((prev) => prev + REWARD_AMOUNT);
-    setRewardStatus((prev) => ({
-      date: getTodayKey(),
-      count: prev.count + 1,
-    }));
-  }
-
-  function moveAfterRest(withReward: boolean) {
-    if (withReward) {
-      earnReward();
-    }
-
-    setIsResting(false);
-    setTimeLeft(DEFAULT_REST_SECONDS);
-
-    if (!isLastSet) {
-      setCurrentSetIndex((prev) => prev + 1);
-      return;
-    }
-
-    if (!isLastExercise) {
-      const nextExerciseIndex = currentExIndex + 1;
-      const nextExercise = selectedRoutine?.exercises[nextExerciseIndex];
-      if (!nextExercise) return;
-
-      setCurrentExIndex(nextExerciseIndex);
-      setCurrentSetIndex(0);
-      setSets(nextExercise.sets);
-      return;
-    }
-
-    finishWorkout();
-  }
-
-  function detectNewPRs(sessionExercises: WorkoutExercise[]) {
-    const detected: PersonalRecord[] = [];
-    const nextRecords = [...personalRecords];
-
-    sessionExercises.forEach((exercise) => {
-      const maxWeight = Math.max(...exercise.sets.map((set) => set.weight));
-      const maxReps = Math.max(...exercise.sets.map((set) => set.reps));
-      const prevRecord = nextRecords.find((record) => record.exerciseId === exercise.exerciseId);
-
-      const isWeightPR = !prevRecord || maxWeight > prevRecord.maxWeight;
-      const isRepsPR = !prevRecord || maxReps > prevRecord.maxReps;
-
-      if (isWeightPR || isRepsPR) {
-        const updatedRecord: PersonalRecord = {
-          exerciseId: exercise.exerciseId,
-          exerciseName: exercise.name,
-          maxWeight: Math.max(prevRecord?.maxWeight ?? 0, maxWeight),
-          maxReps: Math.max(prevRecord?.maxReps ?? 0, maxReps),
-          updatedAt: new Date().toISOString(),
-        };
-
-        const existingIndex = nextRecords.findIndex(
-          (record) => record.exerciseId === exercise.exerciseId
-        );
-
-        if (existingIndex >= 0) {
-          nextRecords[existingIndex] = updatedRecord;
-        } else {
-          nextRecords.push(updatedRecord);
-        }
-
-        detected.push(updatedRecord);
-      }
-    });
-
-    setPersonalRecords(nextRecords);
-    setNewPRs(detected);
-  }
-
-  function finishWorkout() {
-    if (!selectedRoutine || !workoutStartTime) return;
-
-    const mergedExercises = selectedRoutine.exercises.map((exercise, index) => {
-      if (index !== currentExIndex) return exercise;
-      return {
-        ...exercise,
-        sets,
-      };
-    });
-
-    const completedExercises = mergedExercises.map((exercise) => ({
-      exerciseId: exercise.exerciseId,
-      exerciseName: exercise.name,
-      category: exercise.category,
-      volume: calculateExerciseVolume(exercise.sets),
-    }));
-
-    const totalVolume = completedExercises.reduce((sum, item) => sum + item.volume, 0);
-
-    const session: WorkoutSession = {
-      id: `${Date.now()}`,
-      routineName: selectedRoutine.name,
-      startedAt: new Date(workoutStartTime).toISOString(),
-      finishedAt: new Date().toISOString(),
-      durationSeconds: Math.floor((Date.now() - workoutStartTime) / 1000),
-      totalVolume,
-      completedExercises,
-    };
-
-    setWorkoutHistory((prev) => [session, ...prev]);
-    setLastSessionSummary(session);
-    detectNewPRs(mergedExercises);
-
-    setView("FINISH");
-    setIsResting(false);
-  }
-
-  function resetWorkoutState() {
-    setSelectedRoutine(null);
     setCurrentExIndex(0);
     setCurrentSetIndex(0);
-    setSets([]);
-    setWorkoutStartTime(null);
-    setElapsedTime(0);
     setIsResting(false);
-    setTimeLeft(DEFAULT_REST_SECONDS);
-    setIsTempoOn(false);
-  }
+    setTimeLeft(config.restSeconds);
 
-  function exitToHome() {
-    resetWorkoutState();
-    setView("HOME");
-  }
-
-  function speakTempo() {
-    if (!isTempoOn || !speechRef.current || !currentExercise) return;
-    const utterance = new SpeechSynthesisUtterance(`${currentExercise.name}, 템포 시작`);
-    speechRef.current.cancel();
-    speechRef.current.speak(utterance);
-  }
-
-  useEffect(() => {
-    if (view === "WORKOUT" && currentExercise && isTempoOn) {
-      speakTempo();
+    if (finalExercises[0]) {
+      setupExercise(finalExercises[0]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentExIndex, isTempoOn, view]);
 
-  function renderHomeView() {
-    const latestSession = workoutHistory[0];
+    setView("WORKOUT");
+  };
 
+  const setupExercise = (exercise: RoutineExercise) => {
+    setSets(
+      Array(exercise.setCount)
+        .fill(null)
+        .map((_, i) => ({
+          id: i + 1,
+          weight: exercise.defaultWeight,
+          reps: exercise.defaultReps,
+          isEdited: false,
+        }))
+    );
+  };
+
+  const updateSetValue = (
+    index: number,
+    field: "weight" | "reps",
+    value: number
+  ) => {
+    const newSets = [...sets];
+    newSets[index][field] = value;
+    newSets[index].isEdited = true;
+
+    if (index === 0) {
+      for (let i = 1; i < newSets.length; i++) {
+        if (!newSets[i].isEdited) {
+          newSets[i][field] = value;
+        }
+      }
+    }
+
+    setSets(newSets);
+  };
+
+  const handleSkipRest = () => {
+    if (rewardStatus.count < DAILY_REWARD_LIMIT) {
+      setUserPoints((prev) => prev + REWARD_AMOUNT);
+      setRewardStatus((prev) => ({
+        ...prev,
+        count: prev.count + 1,
+      }));
+    }
+
+    setIsResting(false);
+    setTimeLeft(INTENSITY_CONFIG[intensity].restSeconds);
+
+    if (currentSetIndex < sets.length - 1) {
+      setCurrentSetIndex((prev) => prev + 1);
+    } else if (
+      selectedRoutine &&
+      currentExIndex < selectedRoutine.exercises.length - 1
+    ) {
+      const nextIndex = currentExIndex + 1;
+      setCurrentExIndex(nextIndex);
+      setCurrentSetIndex(0);
+      setupExercise(selectedRoutine.exercises[nextIndex]);
+    } else {
+      setView("FINISH");
+    }
+  };
+
+  if (view === "HOME") {
     return (
-      <main className="min-h-screen bg-slate-100 p-6 md:p-10">
-        <div className="mx-auto max-w-5xl space-y-6">
-          <div className="flex items-center justify-between rounded-[2rem] bg-white p-6 shadow-lg">
-            <div>
-              <h1 className="text-3xl font-black tracking-tight">MINIMAL FIT</h1>
-              <p className="mt-2 text-sm text-slate-500">고민 없이 바로 시작하는 운동 앱</p>
-            </div>
-            <div className="rounded-2xl bg-slate-900 px-5 py-4 text-white">
-              <div className="text-xs text-slate-300">보유 포인트</div>
-              <div className="text-2xl font-black">{userPoints.toLocaleString()} FP</div>
-            </div>
-          </div>
-
-          <button
-            onClick={() => generateRollingRoutine("초급", "무분할")}
-            className="w-full rounded-[2.5rem] bg-gradient-to-br from-blue-600 to-indigo-700 p-8 text-left text-white shadow-2xl transition active:scale-[0.99]"
-          >
-            <div className="text-sm font-medium opacity-90">오늘의 루틴</div>
-            <div className="mt-3 text-3xl font-black">내 루틴 시작하기</div>
-            <div className="mt-3 text-base opacity-90">지난 운동 다음 종목부터 시작 →</div>
-          </button>
-
-          <div className="grid gap-6 md:grid-cols-3">
-            <button
-              onClick={() => generateRollingRoutine("초급", "상체")}
-              className="rounded-[2rem] bg-white p-6 text-left shadow-lg transition hover:-translate-y-0.5"
-            >
-              <div className="text-sm text-slate-500">빠른 시작</div>
-              <div className="mt-2 text-xl font-bold">상체 루틴</div>
-            </button>
-
-            <button
-              onClick={() => generateRollingRoutine("초급", "하체")}
-              className="rounded-[2rem] bg-white p-6 text-left shadow-lg transition hover:-translate-y-0.5"
-            >
-              <div className="text-sm text-slate-500">빠른 시작</div>
-              <div className="mt-2 text-xl font-bold">하체 루틴</div>
-            </button>
-
-            <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-              <div className="text-sm text-slate-500">오늘 적립 가능</div>
-              <div className="mt-2 text-xl font-bold">
-                {Math.max(0, DAILY_REWARD_LIMIT - rewardStatus.count)}회 남음
-              </div>
-              <div className="mt-2 text-sm text-slate-400">1일 최대 2회 / 회당 30FP</div>
-            </div>
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2">
-            <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-              <div className="text-sm text-slate-500">최근 루틴</div>
-              <div className="mt-2 text-xl font-bold">{todayRoutineLabel}</div>
-              <div className="mt-4 text-sm text-slate-400">
-                스트릭: <span className="font-semibold text-slate-700">{streak}일</span>
-              </div>
-            </div>
-
-            <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-              <div className="text-sm text-slate-500">최근 운동</div>
-              {latestSession ? (
-                <>
-                  <div className="mt-2 text-xl font-bold">{latestSession.routineName}</div>
-                  <div className="mt-3 text-sm text-slate-500">
-                    총 볼륨 {latestSession.totalVolume.toLocaleString()} / 시간{" "}
-                    {formatTime(latestSession.durationSeconds)}
+      <main className="min-h-screen bg-[#f5f7fb] px-4 py-6 md:px-8 md:py-10">
+        <div className="mx-auto max-w-5xl space-y-5">
+          <section className="premium-card overflow-hidden bg-white">
+            <div className="grid gap-0 md:grid-cols-[1.5fr_0.9fr]">
+              <div className="p-5 md:p-7">
+                <div className="mb-5 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-slate-400">
+                      Today Routine
+                    </p>
+                    <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-900 md:text-3xl">
+                      {previewRoutine.length} exercises
+                    </h1>
                   </div>
-                </>
-              ) : (
-                <div className="mt-2 text-sm text-slate-400">아직 운동 기록이 없습니다.</div>
-              )}
+
+                  <div className="rounded-2xl bg-slate-900 px-4 py-3 text-right text-white shadow-lg">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                      Points
+                    </div>
+                    <div className="text-2xl font-black">{userPoints}P</div>
+                  </div>
+                </div>
+
+                <div className="overflow-hidden rounded-[1.5rem] border border-slate-200">
+                  <div className="grid grid-cols-[minmax(0,1fr)_64px_56px_56px] bg-slate-100 px-4 py-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    <div>Exercise</div>
+                    <div className="text-center">kg</div>
+                    <div className="text-center">set</div>
+                    <div className="text-center">rep</div>
+                  </div>
+
+                  <div className="divide-y divide-slate-100 bg-white">
+                    {previewRoutine.map((exercise) => (
+                      <div
+                        key={exercise.id}
+                        className="grid grid-cols-[minmax(0,1fr)_64px_56px_56px] items-center px-4 py-3"
+                      >
+                        <div className="min-w-0 pr-3">
+                          <div className="truncate text-[15px] font-semibold text-slate-900 md:text-base">
+                            {exercise.name}
+                          </div>
+                          <div className="mt-0.5 text-xs text-slate-400">
+                            {exercise.category} · {exercise.subTarget}
+                          </div>
+                        </div>
+
+                        <div className="text-center text-sm font-bold text-slate-800">
+                          {exercise.defaultWeight === 0 ? "-" : exercise.defaultWeight}
+                        </div>
+                        <div className="text-center text-sm font-bold text-slate-800">
+                          {exercise.setCount}
+                        </div>
+                        <div className="text-center text-sm font-bold text-slate-800">
+                          {exercise.defaultReps}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col justify-between border-t border-slate-100 bg-slate-50 p-5 md:border-l md:border-t-0 md:p-7">
+                <div className="space-y-5">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                      Type
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      {(["무분할", "상체", "하체"] as RoutineType[]).map((item) => (
+                        <button
+                          key={item}
+                          onClick={() => setRoutineType(item)}
+                          className={`rounded-2xl px-3 py-3 text-sm font-bold transition ${
+                            routineType === item
+                              ? "bg-slate-900 text-white shadow-lg"
+                              : "bg-white text-slate-600 shadow-sm"
+                          }`}
+                        >
+                          {item}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                      Intensity
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      {(Object.keys(INTENSITY_CONFIG) as Intensity[]).map((key) => (
+                        <button
+                          key={key}
+                          onClick={() => setIntensity(key)}
+                          className={`rounded-2xl px-3 py-3 text-sm font-bold transition ${
+                            intensity === key
+                              ? "bg-blue-600 text-white shadow-lg"
+                              : "bg-white text-slate-600 shadow-sm"
+                          }`}
+                        >
+                          {INTENSITY_CONFIG[key].label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-[1.75rem] bg-white p-5 shadow-sm">
+                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                      Estimated
+                    </div>
+                    <div className="mt-2 text-4xl font-black tracking-tight text-slate-900">
+                      {formatEstimatedMinutes(estimatedMinutes)}
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-sm text-slate-500">
+                      <div className="rounded-2xl bg-slate-50 px-3 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.12em] text-slate-400">
+                          Exercises
+                        </div>
+                        <div className="mt-1 font-bold text-slate-900">
+                          {previewRoutine.length}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 px-3 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.12em] text-slate-400">
+                          Rest
+                        </div>
+                        <div className="mt-1 font-bold text-slate-900">
+                          {INTENSITY_CONFIG[intensity].restSeconds}s
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-5 space-y-3">
+                  <button
+                    onClick={generateRollingRoutine}
+                    className="w-full rounded-[1.75rem] bg-slate-900 px-5 py-5 text-lg font-black tracking-tight text-white shadow-2xl transition hover:translate-y-[-1px] active:scale-[0.99]"
+                  >
+                    START
+                  </button>
+
+                  <button
+                    onClick={() => generateRollingRoutine()}
+                    className="w-full rounded-[1.4rem] border border-slate-200 bg-white px-5 py-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    다른 루틴 시작하기
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
+          </section>
         </div>
       </main>
     );
   }
 
-  function renderWorkoutView() {
-    if (!selectedRoutine || !currentExercise) return null;
-
-    const currentSet = sets[currentSetIndex];
-
+  if (view === "WORKOUT" && selectedRoutine && currentExercise) {
     return (
       <main className="min-h-screen bg-slate-100 p-6 md:p-10">
         <div className="mx-auto max-w-4xl space-y-6">
           <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center justify-between gap-3">
               <button
                 onClick={() => setView("CHECK")}
                 className="text-sm font-semibold text-blue-600 underline"
               >
                 ROUTINE LIST
               </button>
+
               <div className="text-lg font-bold">{formatTime(elapsedTime)}</div>
+
               <button
-                onClick={exitToHome}
+                onClick={() => setView("HOME")}
                 className="text-sm font-semibold text-rose-500"
               >
                 EXIT
               </button>
             </div>
 
-            <div className="mt-6">
+            <div className="mt-5">
               <div className="text-sm text-slate-500">
                 {currentExIndex + 1} / {selectedRoutine.exercises.length}
               </div>
@@ -644,6 +521,7 @@ export default function Home() {
             <div className="space-y-3">
               {sets.map((set, index) => {
                 const isCurrent = index === currentSetIndex;
+
                 return (
                   <div
                     key={set.id}
@@ -658,7 +536,7 @@ export default function Home() {
                       value={set.weight}
                       disabled={!isCurrent || isResting}
                       onChange={(e) =>
-                        syncSetValue(index, "weight", Number(e.target.value || 0))
+                        updateSetValue(currentSetIndex, "weight", Number(e.target.value))
                       }
                       className="rounded-xl border border-slate-300 px-3 py-3 text-center text-lg font-bold"
                     />
@@ -670,7 +548,7 @@ export default function Home() {
                       value={set.reps}
                       disabled={!isCurrent || isResting}
                       onChange={(e) =>
-                        syncSetValue(index, "reps", Number(e.target.value || 0))
+                        updateSetValue(currentSetIndex, "reps", Number(e.target.value))
                       }
                       className="rounded-xl border border-slate-300 px-3 py-3 text-center text-lg font-bold"
                     />
@@ -678,17 +556,11 @@ export default function Home() {
                 );
               })}
             </div>
-
-            {currentSet && (
-              <div className="mt-6 text-sm text-slate-500">
-                현재 진행: {currentSet.id}세트 / {sets.length}세트
-              </div>
-            )}
           </div>
 
           {!isResting ? (
             <button
-              onClick={markCurrentSetDone}
+              onClick={() => setIsResting(true)}
               className="w-full rounded-[2.5rem] bg-slate-900 py-8 text-3xl font-black text-white shadow-2xl transition active:scale-[0.99]"
             >
               DONE
@@ -699,25 +571,23 @@ export default function Home() {
               <div className="mt-3 text-center text-5xl font-black">{timeLeft}</div>
               <div className="mt-6 grid gap-3 md:grid-cols-2">
                 <button
-                  onClick={() => moveAfterRest(true)}
-                  disabled={!canEarnReward}
-                  className={`rounded-2xl px-5 py-4 text-lg font-bold ${
-                    canEarnReward
-                      ? "bg-emerald-500 text-white"
-                      : "bg-slate-200 text-slate-400"
-                  }`}
+                  onClick={handleSkipRest}
+                  className="rounded-2xl bg-emerald-500 px-5 py-4 text-lg font-bold text-white"
                 >
-                  광고 보고 +30FP
+                  +30P
                 </button>
                 <button
-                  onClick={() => moveAfterRest(false)}
+                  onClick={() => {
+                    setIsResting(false);
+                    setTimeLeft(INTENSITY_CONFIG[intensity].restSeconds);
+                  }}
                   className="rounded-2xl bg-slate-900 px-5 py-4 text-lg font-bold text-white"
                 >
-                  휴식 건너뛰기
+                  SKIP
                 </button>
               </div>
               <div className="mt-4 text-center text-xs text-slate-400">
-                오늘 {rewardStatus.count} / {DAILY_REWARD_LIMIT}회 적립
+                {rewardStatus.count} / {DAILY_REWARD_LIMIT}
               </div>
             </div>
           )}
@@ -726,9 +596,7 @@ export default function Home() {
     );
   }
 
-  function renderCheckView() {
-    if (!selectedRoutine) return null;
-
+  if (view === "CHECK" && selectedRoutine) {
     return (
       <main className="min-h-screen bg-slate-100 p-6 md:p-10">
         <div className="mx-auto max-w-3xl rounded-[2rem] bg-white p-6 shadow-lg">
@@ -745,7 +613,7 @@ export default function Home() {
           <div className="mt-6 space-y-3">
             {selectedRoutine.exercises.map((exercise, index) => (
               <div
-                key={`${exercise.exerciseId}-${index}`}
+                key={`${exercise.id}-${index}`}
                 className={`rounded-2xl border p-4 ${
                   index === currentExIndex
                     ? "border-blue-500 bg-blue-50"
@@ -757,7 +625,8 @@ export default function Home() {
                 </div>
                 <div className="mt-1 text-lg font-bold">{exercise.name}</div>
                 <div className="mt-1 text-sm text-slate-500">
-                  {exercise.category} | {exercise.subTarget} | {exercise.equipment}
+                  {exercise.category} | {exercise.subTarget} | {exercise.defaultWeight}kg ×{" "}
+                  {exercise.defaultReps}
                 </div>
               </div>
             ))}
@@ -767,103 +636,24 @@ export default function Home() {
     );
   }
 
-  function renderFinishView() {
+  if (view === "FINISH") {
     return (
       <main className="min-h-screen bg-slate-100 p-6 md:p-10">
-        <div className="mx-auto max-w-4xl space-y-6">
-          <div className="rounded-[2rem] bg-white p-8 text-center shadow-lg">
-            <div className="text-sm text-slate-500">운동 완료</div>
-            <h2 className="mt-3 text-4xl font-black">Great Job</h2>
-            <div className="mt-4 text-slate-500">오늘 운동이 저장되었습니다.</div>
-          </div>
-
-          {lastSessionSummary && (
-            <div className="grid gap-6 md:grid-cols-3">
-              <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-                <div className="text-sm text-slate-500">총 운동 시간</div>
-                <div className="mt-2 text-2xl font-black">
-                  {formatTime(lastSessionSummary.durationSeconds)}
-                </div>
-              </div>
-              <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-                <div className="text-sm text-slate-500">총 볼륨</div>
-                <div className="mt-2 text-2xl font-black">
-                  {lastSessionSummary.totalVolume.toLocaleString()}
-                </div>
-              </div>
-              <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-                <div className="text-sm text-slate-500">연속 운동일</div>
-                <div className="mt-2 text-2xl font-black">{streak}일</div>
-              </div>
-            </div>
-          )}
-
-          <div className="grid gap-6 md:grid-cols-2">
-            <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-              <div className="text-lg font-bold">오늘 수행 운동</div>
-              <div className="mt-4 space-y-3">
-                {lastSessionSummary?.completedExercises.map((exercise) => (
-                  <div
-                    key={exercise.exerciseId}
-                    className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3"
-                  >
-                    <div>
-                      <div className="font-semibold">{exercise.exerciseName}</div>
-                      <div className="text-xs text-slate-400">{exercise.category}</div>
-                    </div>
-                    <div className="text-sm font-bold">
-                      {exercise.volume.toLocaleString()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-[2rem] bg-white p-6 shadow-lg">
-              <div className="text-lg font-bold">새로운 PR</div>
-              <div className="mt-4 space-y-3">
-                {newPRs.length > 0 ? (
-                  newPRs.map((pr) => (
-                    <div
-                      key={pr.exerciseId}
-                      className="rounded-2xl bg-emerald-50 px-4 py-3"
-                    >
-                      <div className="font-semibold">{pr.exerciseName}</div>
-                      <div className="mt-1 text-sm text-slate-600">
-                        최고 중량 {pr.maxWeight}kg / 최고 반복 {pr.maxReps}회
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                    이번 세션에서 갱신된 PR은 없습니다.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+        <div className="mx-auto max-w-3xl rounded-[2rem] bg-white p-8 text-center shadow-lg">
+          <div className="text-sm text-slate-500">운동 완료</div>
+          <h2 className="mt-3 text-4xl font-black">Great Job</h2>
+          <div className="mt-3 text-slate-500">오늘 운동이 저장되었습니다.</div>
 
           <button
-            onClick={exitToHome}
-            className="w-full rounded-[2.5rem] bg-slate-900 py-6 text-2xl font-black text-white shadow-2xl"
+            onClick={() => setView("HOME")}
+            className="mt-8 w-full rounded-[2rem] bg-slate-900 py-5 text-xl font-black text-white shadow-xl"
           >
-            홈으로 돌아가기
+            HOME
           </button>
         </div>
       </main>
     );
   }
 
-  switch (view) {
-    case "HOME":
-      return renderHomeView();
-    case "WORKOUT":
-      return renderWorkoutView();
-    case "CHECK":
-      return renderCheckView();
-    case "FINISH":
-      return renderFinishView();
-    default:
-      return null;
-  }
+  return null;
 }
