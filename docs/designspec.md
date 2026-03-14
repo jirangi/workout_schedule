@@ -45,6 +45,19 @@ interface ExerciseInfo {
 2. 상태가 변할 때마다(포인트 획득, 운동 완료 등) 즉시 LocalStorage에 덮어쓴다.
 3. 날짜가 바뀌어 접속할 경우 rewardStatus.count는 자동으로 0으로 초기화한다.
 
+### 2.3 홈/루틴 제어 상태 (Home / Routine Control State)
+
+`app/page.tsx` 내부에서 홈 프리뷰와 설정 모달 제어를 위해 사용하는 상태입니다.
+
+```typescript
+type RoutineType = "무분할" | "상체" | "하체";
+type Intensity = "LIGHT" | "NORMAL" | "HARD";
+type VolumeMode = "LOW" | "NORMAL" | "HIGH";
+
+type PreviewOverride = Partial<
+  Pick<RoutineExercise, "defaultWeight" | "defaultReps" | "setCount">
+>;
+
 ---
 
 ## 3. 핵심 비즈니스 로직 설계 (Technical Logic)
@@ -65,6 +78,50 @@ interface ExerciseInfo {
 * **동작**: isTempoOn 상태 및 view === "WORKOUT" 조건 충족 시 1초 간격 음성 카운트 실행.
 * **최적화**: 음성 출력 전 기존 대기열을 초기화(cancel())하여 중첩 방지.
 
+### 3.4 [F24] 홈 프리뷰 생성 로직
+* **목적**: 홈 화면에서 오늘의 루틴을 운동 목록 표 형태로 즉시 미리보기.
+* **입력값**: `routineType`, `intensity`, `volumeMode`, `activeCategories`, `lastIndices`, `previewOverrides`
+* **출력값**: `previewRoutine`
+* **규칙**:
+  1. `routineType`에 따라 기본 부위 목록을 결정한다.
+  2. `activeCategories`에 포함된 부위만 오늘 루틴 후보에 포함한다.
+  3. `volumeMode`에 따라 부위별 추천 종목 수를 조절한다.
+  4. 추천 종목은 Rolling Index를 기준으로 순환 선택한다.
+  5. `previewOverrides`가 존재하면 기본 중량/세트/반복 값을 덮어쓴다.
+
+### 3.5 [F25] 운동 볼륨 설정 로직
+* **목적**: 부위별 추천 종목 수를 줄이거나 늘려 운동량을 조절.
+* **동작 원리**:
+  - `LOW`: 부위별 추천 종목 수 축소
+  - `NORMAL`: 기본 추천 종목 수 적용
+  - `HIGH`: 부위별 추천 종목 수 확대
+* **순환 정책**: 이번 회차에서 제외된 종목은 다음 회차 Rolling Routine에서 다시 추천 대상이 된다.
+
+### 3.6 [F26] 운동 종목 토글 로직
+* **목적**: 오늘 루틴에 포함할 부위를 사용자가 직접 켜고 끌 수 있도록 지원.
+* **동작 원리**:
+  - `activeCategories` 배열에 부위명을 추가/제거하여 토글 처리
+  - 토글 OFF 된 부위는 홈 프리뷰와 실제 루틴 생성에서 제외
+
+### 3.7 [F27] 프리뷰 직접 수정 로직
+* **목적**: 홈 화면 프리뷰에서 각 운동의 kg / set / rep를 직접 수정.
+* **동작 원리**:
+  - 사용자가 숫자를 클릭하면 prompt 또는 입력 UI를 통해 값을 수정
+  - 수정값은 `previewOverrides`에 저장
+  - 실제 운동 시작 시 override가 반영된 루틴으로 세트가 생성됨
+
+### 3.8 [F28] 공통 설정 모달 로직
+* **목적**: 홈 화면과 운동 화면에서 동일한 설정 UI 제공.
+* **설정 항목**:
+  - 루틴 분할
+  - 운동 강도
+  - 운동 볼륨
+  - 운동 종목
+  - 휴식 시간
+* **적용 방식**:
+  - 홈 화면에서는 프리뷰에 즉시 반영
+  - 운동 화면에서는 현재 루틴에 재적용
+
 ---
 
 ## 4. UI/UX 컴포넌트 및 인터랙션 규격
@@ -77,3 +134,10 @@ interface ExerciseInfo {
 ### 4.2 상태 기반 UI 처리
 * **Rest Mode**: 휴식 진입 시 배경을 bg-slate-950으로 변경하고 타이머 시인성 극대화.
 * **Reward Feedback**: 포인트 적립 성공 시 상단 FP 대시보드에 animate-bounce 애니메이션 적용.
+
+### 4.3 홈 화면 규격 (Home Screen Rule)
+* **상단 헤더**: `오늘의 루틴` + `포인트`
+* **루틴 요약 영역**: 루틴명 / 예상 운동시간 / 메인 부위 / 총 세트 수 / 설정 버튼
+* **루틴 프리뷰 표**: 운동명, kg, set, rep를 한 화면에서 스캔 가능해야 함
+* **하단 CTA**: `내 루틴 시작하기` 버튼은 항상 화면 하단에 고정
+* **설정 진입 방식**: 홈 화면의 분할/강도/휴식은 별도 카드가 아니라 설정 버튼으로 진입
