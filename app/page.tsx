@@ -1149,8 +1149,8 @@ export default function Home() {
               <div className="mt-3 text-center text-5xl font-black">{timeLeft}</div>
               <div className="mt-6 grid gap-3 md:grid-cols-2">
                 <button
-                  onClick={() => moveAfterRest(true)}
-                  disabled={!canEarnReward}
+                  onClick={handleRewardAd}
+                  disabled={!canEarnReward || isAdLoading}
                   className={`rounded-2xl px-5 py-4 text-lg font-bold ${
                     canEarnReward
                       ? "bg-emerald-500 text-white"
