@@ -1,10 +1,5 @@
-import type { Metadata } from "next";
 import "./globals.css";
-
-export const metadata: Metadata = {
-  title: "Minimal Fit",
-  description: "지능형 순환 루틴 운동 플랫폼",
-};
+import Script from "next/script";
 
 export default function RootLayout({
   children,
@@ -13,7 +8,15 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ko">
-      <body>{children}</body>
+      <body>
+        {children}
+
+        <Script
+          id="gpt-script"
+          src="https://securepubads.g.doubleclick.net/tag/js/gpt.js"
+          strategy="afterInteractive"
+        />
+      </body>
     </html>
   );
 }
