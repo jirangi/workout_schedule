@@ -20,12 +20,16 @@ interface RoutineExercise extends ExerciseInfo {
   setCount: number;
 }
 
+interface WorkoutExercise extends RoutineExercise {
+  sets: SetLog[];
+}
+
 interface SelectedRoutine {
   name: string;
   level: string;
   type: RoutineType;
   intensity: Intensity;
-  exercises: RoutineExercise[];
+  exercises: WorkoutExercise[];
 }
 
 interface PersonalRecord {
@@ -67,17 +71,6 @@ interface UserPersistence {
 const STORAGE_KEY = "MINIMAL_FIT_DATA";
 const DAILY_REWARD_LIMIT = 2;
 const REWARD_AMOUNT = 30;
-
-const DEFAULT_PERSISTENCE: UserPersistence = {
-  userPoints: 0,
-  rewardStatus: {
-    date: "",
-    count: 0,
-  },
-  lastIndices: {},
-  workoutHistory: [],
-  personalRecords: [],
-};
 
 const INTENSITY_CONFIG: Record<
   Intensity,
@@ -135,7 +128,10 @@ function normalizePersistence(data: Partial<UserPersistence> | null): UserPersis
   };
 }
 
-function createInitialSets(exercise: Pick<ExerciseInfo, "defaultWeight" | "defaultReps">, setCount: number): SetLog[] {
+function createInitialSets(
+  exercise: Pick<ExerciseInfo, "defaultWeight" | "defaultReps">,
+  setCount: number
+): SetLog[] {
   return Array.from({ length: setCount }, (_, i) => ({
     id: i + 1,
     weight: exercise.defaultWeight,
@@ -368,17 +364,38 @@ export default function Home() {
     return selectedRoutine.exercises[currentExIndex] ?? null;
   }, [selectedRoutine, currentExIndex]);
 
+  const activeIntensity = selectedRoutine?.intensity ?? intensity;
   const canEarnReward = rewardStatus.count < DAILY_REWARD_LIMIT;
   const isLastSet = currentSetIndex === sets.length - 1;
   const isLastExercise =
     !!selectedRoutine && currentExIndex === selectedRoutine.exercises.length - 1;
   const streak = useMemo(() => calculateStreak(workoutHistory), [workoutHistory]);
 
-  function buildWorkoutExercise(exercise: RoutineExercise) {
+  function buildWorkoutExercise(exercise: RoutineExercise): WorkoutExercise {
     return {
       ...exercise,
       sets: createInitialSets(exercise, exercise.setCount),
     };
+  }
+
+  function persistCurrentExerciseSets(updatedSets: SetLog[]) {
+    setSelectedRoutine((prev) => {
+      if (!prev) return prev;
+
+      const nextExercises = [...prev.exercises];
+      const current = nextExercises[currentExIndex];
+      if (!current) return prev;
+
+      nextExercises[currentExIndex] = {
+        ...current,
+        sets: updatedSets,
+      };
+
+      return {
+        ...prev,
+        exercises: nextExercises,
+      };
+    });
   }
 
   function generateRollingRoutine(level: string, type: RoutineType, selectedIntensity: Intensity) {
@@ -414,7 +431,7 @@ export default function Home() {
       level,
       type,
       intensity: selectedIntensity,
-      exercises: finalExercises,
+      exercises: workoutExercises,
     });
     setCurrentExIndex(0);
     setCurrentSetIndex(0);
@@ -442,13 +459,14 @@ export default function Home() {
         }
       }
 
+      persistCurrentExerciseSets(next);
       return next;
     });
   }
 
   function markCurrentSetDone() {
-    setSets((prev) =>
-      prev.map((set, index) =>
+    setSets((prev) => {
+      const next = prev.map((set, index) =>
         index === currentSetIndex
           ? {
               ...set,
@@ -456,19 +474,23 @@ export default function Home() {
               completedAt: new Date().toISOString(),
             }
           : set
-      )
-    );
+      );
+
+      persistCurrentExerciseSets(next);
+      return next;
+    });
+
     setIsResting(true);
-    setTimeLeft(INTENSITY_CONFIG[intensity].restSeconds);
+    setTimeLeft(INTENSITY_CONFIG[activeIntensity].restSeconds);
   }
 
   function earnReward() {
     if (!canEarnReward) return;
 
     setUserPoints((prev) => prev + REWARD_AMOUNT);
-    setRewardStatus(() => ({
+    setRewardStatus((prev) => ({
       date: getTodayKey(),
-      count: rewardStatus.count + 1,
+      count: prev.count + 1,
     }));
   }
 
@@ -477,8 +499,9 @@ export default function Home() {
       earnReward();
     }
 
+    persistCurrentExerciseSets(sets);
     setIsResting(false);
-    setTimeLeft(INTENSITY_CONFIG[intensity].restSeconds);
+    setTimeLeft(INTENSITY_CONFIG[activeIntensity].restSeconds);
 
     if (!isLastSet) {
       setCurrentSetIndex((prev) => prev + 1);
@@ -492,14 +515,14 @@ export default function Home() {
 
       setCurrentExIndex(nextExerciseIndex);
       setCurrentSetIndex(0);
-      setSets(createInitialSets(nextExercise, nextExercise.setCount));
+      setSets(nextExercise.sets);
       return;
     }
 
     finishWorkout();
   }
 
-  function detectNewPRs(sessionExercises: Array<RoutineExercise & { sets: SetLog[] }>) {
+  function detectNewPRs(sessionExercises: WorkoutExercise[]) {
     const detected: PersonalRecord[] = [];
     const nextRecords = [...personalRecords];
 
@@ -542,13 +565,7 @@ export default function Home() {
     if (!selectedRoutine || !workoutStartTime) return;
 
     const mergedExercises = selectedRoutine.exercises.map((exercise, index) => {
-      if (index !== currentExIndex) {
-        return {
-          ...exercise,
-          sets: createInitialSets(exercise, exercise.setCount),
-        };
-      }
-
+      if (index !== currentExIndex) return exercise;
       return {
         ...exercise,
         sets,
@@ -648,9 +665,7 @@ export default function Home() {
                 <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
                   예상 시간
                 </p>
-                <p className="mt-1 text-2xl font-black">
-                  {formatHourMin(estimatedMinutes)}
-                </p>
+                <p className="mt-1 text-2xl font-black">{formatHourMin(estimatedMinutes)}</p>
               </div>
 
               <div className="rounded-[1.6rem] bg-white/10 px-4 py-3 backdrop-blur">
