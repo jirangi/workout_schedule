@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EXERCISE_DATABASE, ExerciseInfo } from "../data/exercises";
 
-type View = "HOME" | "WORKOUT" | "CHECK" | "FINISH";
+type View = "HOME" | "WORKOUT" | "REST" | "CHECK" | "FINISH";
 type RoutineType = "무분할" | "상체" | "하체";
 type Intensity = "LIGHT" | "NORMAL" | "HARD";
 type VolumeMode = "LOW" | "NORMAL" | "HIGH";
@@ -261,6 +261,9 @@ export default function Page() {
   const timerRef = useRef<number | null>(null);
   const restRef = useRef<number | null>(null);
 
+  const [restDuration, setRestDuration] = useState(DEFAULT_REST_SECONDS);
+  const [isRestSettingOpen, setIsRestSettingOpen] = useState(false);
+  
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
     const today = getTodayKey();
@@ -360,7 +363,7 @@ export default function Page() {
   }, [view, session?.startedAt]);
 
   useEffect(() => {
-    if (view === "WORKOUT" && session?.isResting) {
+    if (view === "REST" && session?.isResting) {
       restRef.current = window.setInterval(() => {
         setSession((prev) => {
           if (!prev || !prev.isResting) return prev;
@@ -646,16 +649,16 @@ export default function Page() {
 
   function completeCurrentSet() {
     if (!session || !currentExercise || !currentSet) return;
-
+  
     const updatedExercises = session.exercises.map((exercise, exerciseIndex) => {
       if (exerciseIndex !== session.currentExerciseIndex) return exercise;
-
+  
       const nextSets = exercise.sets.map((set, setIndex) =>
         setIndex === session.currentSetIndex ? { ...set, completed: true } : set
       );
-
+  
       const allDone = nextSets.every((set) => set.completed);
-
+  
       return {
         ...exercise,
         sets: nextSets,
@@ -663,15 +666,16 @@ export default function Page() {
         completedAt: allDone ? new Date().toISOString() : exercise.completedAt,
       };
     });
-
+  
     const nextSession: WorkoutSession = {
       ...session,
       exercises: updatedExercises,
       isResting: true,
-      timeLeft: DEFAULT_REST_SECONDS,
+      timeLeft: restDuration,
     };
-
+  
     setSession(nextSession);
+    setView("REST");
     triggerAdReward();
   }
 
@@ -719,17 +723,18 @@ export default function Page() {
   }
 
   function skipRest() {
-    if (!session) return;
+  if (!session) return;
 
-    const nextSession = moveToNextPosition({
-      ...session,
-      isResting: false,
-      timeLeft: 0,
-    });
+  const nextSession = moveToNextPosition({
+    ...session,
+    isResting: false,
+    timeLeft: 0,
+  });
 
-    setSession(nextSession);
-    setAdFallbackVisible(false);
-  }
+  setSession(nextSession);
+  setAdFallbackVisible(false);
+  setView("WORKOUT");
+}
 
   function moveToNextExerciseManually() {
     if (!session) return;
@@ -1165,11 +1170,11 @@ export default function Page() {
     );
   }
 
-  function renderWorkoutView() {
+function renderWorkoutView() {
     if (!session || !currentExercise || !currentSet) return null;
-
+  
     return (
-      <main className={`min-h-screen ${session.isResting ? "bg-slate-950" : "bg-slate-100"}`}>
+      <main className="min-h-screen bg-slate-100">
         <div className="mx-auto max-w-3xl px-4 py-5">
           <div className="mb-4 flex items-center justify-between">
             <button
@@ -1178,20 +1183,12 @@ export default function Page() {
             >
               ROUTINE LIST
             </button>
-
-            <div className={`text-lg font-black ${session.isResting ? "text-white" : "text-slate-900"}`}>
+  
+            <div className="text-lg font-black text-slate-900">
               {formatTime(session.elapsedSeconds)}
             </div>
-
+  
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIsSettingsOpen(true)}
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-lg"
-                aria-label="운동 설정 열기"
-              >
-                ⚙️
-              </button>
-
               <button
                 onClick={() => setView("HOME")}
                 className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700"
@@ -1201,81 +1198,77 @@ export default function Page() {
               </button>
             </div>
           </div>
-
-          <section
-            className={`rounded-[2.5rem] p-5 shadow-2xl ${
-              session.isResting ? "bg-slate-900 text-white" : "bg-white"
-            }`}
-          >
-            <p className={`text-sm font-bold ${session.isResting ? "text-slate-300" : "text-slate-500"}`}>
+  
+          <section className="rounded-[2.5rem] bg-white p-5 shadow-2xl">
+            <p className="text-sm font-bold text-slate-500">
               {session.currentExerciseIndex + 1} / {session.exercises.length}
             </p>
-
-            <h2 className={`mt-2 text-3xl font-black ${session.isResting ? "text-white" : "text-slate-900"}`}>
+  
+            <h2 className="mt-2 text-3xl font-black text-slate-900">
               {currentExercise.name}
             </h2>
-
-            <p className={`mt-2 text-sm ${session.isResting ? "text-slate-300" : "text-slate-500"}`}>
+  
+            <p className="mt-2 text-sm text-slate-500">
               {currentExercise.category} | {currentExercise.subTarget} | {currentExercise.equipment}
             </p>
-
-            <div className="mt-5 rounded-[2rem] border border-slate-200/30 bg-slate-50/10 p-4">
+  
+            <div className="mt-5 rounded-[2rem] border border-slate-200 bg-slate-50 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-bold text-slate-400">현재 세트</p>
-                  <p className="text-2xl font-black">
-                    {session.currentSetIndex + 1}세트
+                  <p className="text-2xl font-black text-slate-900">
+                    ({session.currentSetIndex + 1}/{currentExercise.sets.length})
                     <span className="ml-3 text-lg font-bold">
                       {currentSet.weight}kg / {currentSet.reps}개
                     </span>
                   </p>
                 </div>
-
+  
                 <button
                   onClick={() => setSwitchMenuOpen(true)}
-                  className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-black text-white"
+                  className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white"
                 >
                   다른 운동하기
                 </button>
               </div>
-
+  
               <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <div className="rounded-2xl bg-white/10 p-4">
-                  <p className="mb-3 text-sm font-bold text-slate-300">현재 세트 kg</p>
+                <div className="rounded-2xl bg-white p-4">
+                  <p className="mb-3 text-sm font-bold text-slate-500">kg</p>
                   <div className="flex items-center justify-between gap-3">
                     <button
                       onClick={() => adjustCurrentSet("weight", -5)}
-                      className="h-12 w-12 rounded-2xl bg-white/15 text-2xl font-black"
+                      className="h-12 w-12 rounded-2xl bg-slate-100 text-2xl font-black text-slate-900"
                     >
                       ←
                     </button>
-                    <div className="flex-1 rounded-2xl bg-white px-4 py-3 text-center text-2xl font-black text-slate-900">
+                    <div className="flex-1 rounded-2xl bg-slate-50 px-4 py-3 text-center text-2xl font-black text-slate-900">
                       {currentSet.weight}
                     </div>
                     <button
                       onClick={() => adjustCurrentSet("weight", 5)}
-                      className="h-12 w-12 rounded-2xl bg-white/15 text-2xl font-black"
+                      className="h-12 w-12 rounded-2xl bg-slate-100 text-2xl font-black text-slate-900"
                     >
                       →
                     </button>
                   </div>
                 </div>
-
-                <div className="rounded-2xl bg-white/10 p-4">
-                  <p className="mb-3 text-sm font-bold text-slate-300">현재 세트 개수</p>
+  
+                <div className="rounded-2xl bg-white p-4">
+                  <p className="mb-3 text-sm font-bold text-slate-500">개수</p>
                   <div className="flex items-center justify-between gap-3">
                     <button
                       onClick={() => adjustCurrentSet("reps", -1)}
-                      className="h-12 w-12 rounded-2xl bg-white/15 text-2xl font-black"
+                      className="h-12 w-12 rounded-2xl bg-slate-100 text-2xl font-black text-slate-900"
                     >
                       ←
                     </button>
-                    <div className="flex-1 rounded-2xl bg-white px-4 py-3 text-center text-2xl font-black text-slate-900">
+                    <div className="flex-1 rounded-2xl bg-slate-50 px-4 py-3 text-center text-2xl font-black text-slate-900">
                       {currentSet.reps}
                     </div>
                     <button
                       onClick={() => adjustCurrentSet("reps", 1)}
-                      className="h-12 w-12 rounded-2xl bg-white/15 text-2xl font-black"
+                      className="h-12 w-12 rounded-2xl bg-slate-100 text-2xl font-black text-slate-900"
                     >
                       →
                     </button>
@@ -1283,109 +1276,128 @@ export default function Page() {
                 </div>
               </div>
             </div>
-
+  
             <div className="mt-5 grid gap-3">
-              {currentExercise.sets.map((set, index) => {
-                const isCurrent = index === session.currentSetIndex;
-                return (
-                  <div
-                    key={set.id}
-                    className={`grid grid-cols-[80px_1fr_24px_1fr] items-center gap-3 rounded-[1.5rem] p-4 ${
-                      set.completed
-                        ? "bg-emerald-500/20"
-                        : isCurrent
-                        ? "bg-blue-500/20"
-                        : "bg-slate-100/10"
-                    }`}
-                  >
-                    <div className="text-center text-sm font-black">SET {set.id}</div>
-
-                    <input
-                      type="number"
-                      value={set.weight}
-                      onChange={(e) => syncSetValue(index, "weight", Number(e.target.value || 0))}
-                      className="rounded-xl border border-slate-300 bg-white px-3 py-3 text-center text-lg font-bold text-slate-900"
-                    />
-
-                    <div className="text-center text-lg font-black">×</div>
-
-                    <input
-                      type="number"
-                      value={set.reps}
-                      onChange={(e) => syncSetValue(index, "reps", Number(e.target.value || 0))}
-                      className="rounded-xl border border-slate-300 bg-white px-3 py-3 text-center text-lg font-bold text-slate-900"
-                    />
-                  </div>
-                );
-              })}
+              <button
+                onClick={completeCurrentSet}
+                className="rounded-[2rem] bg-slate-900 px-5 py-5 text-lg font-black text-white"
+              >
+                DONE
+              </button>
+  
+              <button
+                onClick={finishTodayEarly}
+                className="rounded-[2rem] bg-blue-600 px-5 py-4 text-base font-black text-white"
+              >
+                오늘 운동 끝내기
+              </button>
             </div>
-
-            {!session.isResting ? (
-              <div className="mt-5 grid gap-3">
-                <button
-                  onClick={completeCurrentSet}
-                  className="rounded-[2rem] bg-slate-900 px-5 py-5 text-lg font-black text-white"
-                >
-                  DONE
-                </button>
-
-                <button
-                  onClick={finishTodayEarly}
-                  className="rounded-[2rem] bg-rose-500 px-5 py-4 text-base font-black text-white"
-                >
-                  오늘 운동 끝내기
-                </button>
-              </div>
-            ) : (
-              <div className="mt-5 rounded-[2rem] bg-white/10 p-5 text-center">
-                <p className="text-sm font-bold text-slate-300">휴식 중</p>
-                <p className="mt-2 text-5xl font-black">{session.timeLeft}</p>
-
-                <div className="mt-4 grid gap-3">
-                  <div className="rounded-2xl bg-white/10 px-4 py-3 text-sm font-bold">
-                    {isAdLoading ? "광고 불러오는 중..." : `+${REWARD_AMOUNT}P`}
-                  </div>
-
-                  <button
-                    onClick={skipRest}
-                    className="rounded-2xl bg-slate-900 px-5 py-4 text-lg font-bold text-white"
-                  >
-                    SKIP
-                  </button>
-                </div>
-
-                {adFallbackVisible && (
-                  <div className="mt-4 rounded-2xl bg-amber-400/20 p-4">
-                    <p className="text-lg font-black">광고 없음</p>
-                    <p className="mt-1 text-sm text-slate-200">
-                      현재 표시 가능한 광고가 없습니다.
-                    </p>
-                    <button
-                      onClick={() => {
-                        setAdFallbackVisible(false);
-                        skipRest();
-                      }}
-                      className="mt-4 rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white"
-                    >
-                      다음으로 진행
-                    </button>
-                  </div>
-                )}
-
-                <p className="mt-4 text-sm text-slate-300">
-                  오늘 {userData.rewardStatus.count} / {DAILY_REWARD_LIMIT}
-                </p>
-              </div>
-            )}
           </section>
         </div>
-
-        {renderSettingsModal()}
+  
         {renderSwitchMenu()}
       </main>
     );
   }
 
+  function renderRestSettingModal() {
+    if (!isRestSettingOpen) return null;
+  
+    return (
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 p-4">
+        <div className="w-full max-w-md rounded-[2.5rem] bg-white p-6 shadow-2xl">
+          <div className="mb-5 flex items-center justify-between">
+            <h3 className="text-xl font-black text-slate-900">휴식 설정</h3>
+            <button
+              onClick={() => setIsRestSettingOpen(false)}
+              className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700"
+            >
+              닫기
+            </button>
+          </div>
+  
+          <div className="grid gap-3">
+            {[30, 60, 90, 120, 180].map((seconds) => (
+              <button
+                key={seconds}
+                onClick={() => {
+                  setRestDuration(seconds);
+                  setSession((prev) =>
+                    prev && prev.isResting
+                      ? { ...prev, timeLeft: seconds }
+                      : prev
+                  );
+                  setIsRestSettingOpen(false);
+                }}
+                className={`rounded-2xl px-4 py-4 text-left font-bold ${
+                  restDuration === seconds
+                    ? "bg-blue-600 text-white"
+                    : "bg-slate-100 text-slate-700"
+                }`}
+              >
+                {seconds}초
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderRestView() {
+    if (!session) return null;
+  
+    return (
+      <main className="min-h-screen bg-slate-950 text-white">
+        <div className="mx-auto flex min-h-screen max-w-3xl flex-col px-4 py-5">
+          <div className="mb-6 flex items-center justify-between">
+            <div className="text-sm font-bold text-slate-300">휴식 시간</div>
+  
+            <button
+              onClick={() => setIsRestSettingOpen(true)}
+              className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white"
+            >
+              설정
+            </button>
+          </div>
+  
+          <div className="flex flex-1 flex-col items-center justify-center text-center">
+            {isAdLoading ? (
+              <div className="w-full rounded-[2.5rem] bg-white/10 p-10">
+                <p className="text-sm font-bold text-slate-300">광고</p>
+                <p className="mt-4 text-3xl font-black">광고 화면</p>
+                <p className="mt-3 text-sm text-slate-300">광고를 불러오는 중입니다...</p>
+              </div>
+            ) : adFallbackVisible ? (
+              <>
+                <p className="text-sm font-bold text-slate-300">남은 휴식 시간</p>
+                <p className="mt-4 text-7xl font-black">{session.timeLeft}</p>
+                <p className="mt-3 text-lg text-slate-300">초</p>
+              </>
+            ) : (
+              <div className="w-full rounded-[2.5rem] bg-white/10 p-10">
+                <p className="text-sm font-bold text-slate-300">광고</p>
+                <p className="mt-4 text-3xl font-black">광고 화면</p>
+                <p className="mt-3 text-sm text-slate-300">광고가 표시될 영역입니다.</p>
+              </div>
+            )}
+          </div>
+  
+          <div className="pb-4">
+            <button
+              onClick={skipRest}
+              className="w-full rounded-[2.5rem] bg-blue-600 px-5 py-5 text-lg font-black text-white"
+            >
+              휴식 완료하기
+            </button>
+          </div>
+        </div>
+  
+        {renderRestSettingModal()}
+      </main>
+    );
+  }
+  
   function renderCheckView() {
     if (!session) return null;
 
@@ -1539,6 +1551,8 @@ export default function Page() {
       return renderHomeView();
     case "WORKOUT":
       return renderWorkoutView();
+    case "REST":
+      return renderRestView();
     case "CHECK":
       return renderCheckView();
     case "FINISH":
