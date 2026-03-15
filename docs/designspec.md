@@ -57,7 +57,41 @@ type VolumeMode = "LOW" | "NORMAL" | "HIGH";
 type PreviewOverride = Partial<
   Pick<RoutineExercise, "defaultWeight" | "defaultReps" | "setCount">
 >;
+### 2.4 진행 중 운동 세션 스키마 (WorkoutSession)
 
+운동 도중 홈 화면 이동 후 복귀, 휴식 화면 전환, 조기 종료 저장을 위해
+브라우저 localStorage 내 `MINIMAL_FIT_WORKOUT_SESSION` 키에 JSON 형태로 저장되는 구조입니다.
+
+```typescript
+interface WorkoutSet {
+  id: number;
+  weight: number;
+  reps: number;
+  completed: boolean;
+  isEdited: boolean;
+}
+
+interface SessionExercise extends ExerciseInfo {
+  order: number;
+  originalIndex: number;
+  sets: WorkoutSet[];
+  completed: boolean;
+  skipped: boolean;
+  completedAt?: string;
+}
+
+interface WorkoutSession {
+  startedAt: string;
+  routineType: RoutineType;
+  intensity: Intensity;
+  volumeMode: VolumeMode;
+  exercises: SessionExercise[];
+  currentExerciseIndex: number;
+  currentSetIndex: number;
+  elapsedSeconds: number;
+  isResting: boolean;
+  timeLeft: number;
+}
 ---
 
 ## 3. 핵심 비즈니스 로직 설계 (Technical Logic)
@@ -122,6 +156,63 @@ type PreviewOverride = Partial<
   - 홈 화면에서는 프리뷰에 즉시 반영
   - 운동 화면에서는 현재 루틴에 재적용
 
+### 복붙 내용 2 — 비즈니스 로직
+```md
+### 3.9 [F29] 진행 세션 복귀 로직
+
+* **목적**: 운동 도중 홈 화면 또는 앱 재진입 시 이전 위치에서 즉시 이어서 시작할 수 있도록 지원.
+* **복원 대상**:
+  - `currentExerciseIndex`
+  - `currentSetIndex`
+  - `elapsedSeconds`
+  - `isResting`
+  - `timeLeft`
+  - 현재 세트의 중량/반복값
+* **동작 원리**:
+  1. 앱 초기 진입 시 `MINIMAL_FIT_WORKOUT_SESSION` 존재 여부를 확인한다.
+  2. 저장된 세션이 있으면 홈 화면에 '진행 중인 운동 이어하기' 진입점을 표시한다.
+  3. 복귀 시 마지막 저장 위치로 즉시 이동한다.
+
+### 3.10 [F30] 운동 전환 로직
+
+* **목적**: 사용자가 운동 기구 사용 불가, 혼잡, 컨디션 변화 등에 대응할 수 있도록 현재 운동을 전환.
+* **전환 방식**:
+  - `Next Exercise`: 현재 순서 기준 다음 운동으로 이동
+  - `Next Muscle Group`: 다음 카테고리의 미완료 운동으로 이동
+  - `Same Muscle Alternative`: 동일한 `category + subTarget`을 가지는 다른 운동으로 교체
+* **진행 규칙**:
+  1. 사용자가 선택한 운동이 현재 운동으로 설정된다.
+  2. 해당 운동 수행 후에는 미완료 상태인 원래 순서 운동부터 다시 이어서 진행한다.
+
+### 3.11 [F31] 조기 종료 저장 로직
+
+* **목적**: 루틴 전체를 다 끝내지 못한 경우에도 오늘 운동 기록을 유효하게 저장.
+* **저장 규칙**:
+  1. 완료된 세트가 1개 이상인 운동만 기록 대상으로 본다.
+  2. 통계(PR / 볼륨 / 연속성)는 완료된 세트 기준으로 계산한다.
+  3. 미완료 운동은 결과 기록에서 제외한다.
+  4. Rolling Index는 마지막으로 완료된 운동 기준으로 갱신한다.
+
+### 3.12 [F32] 휴식 전용 화면 로직
+
+* **목적**: DONE 이후 휴식 상태를 별도 화면으로 분리해 집중도를 높인다.
+* **동작 원리**:
+  1. 세트 완료 시 `view`는 `REST`로 전환된다.
+  2. 광고 표시 가능 시 광고 UI를 우선 노출한다.
+  3. 광고가 없을 경우 남은 휴식 시간을 중앙에 크게 표시한다.
+  4. 사용자가 '휴식 완료하기'를 누르거나 타이머가 종료되면 다음 위치로 이동한다.
+
+### 3.13 [F33] 현재 세트 집중 입력 로직
+
+* **목적**: 운동 중 입력 피로도를 줄이고 현재 세트 수행에만 집중하도록 지원.
+* **표시 규칙**:
+  - 이전 세트 목록 미표시
+  - 남은 세트 목록 미표시
+  - 현재 세트만 표시
+  - 진행도는 `(현재세트/총세트)` 형식 사용
+* **조작 규칙**:
+  - 중량은 5kg 단위 증감 버튼 제공
+  - 반복 수는 1회 단위 증감 버튼 제공
 ---
 
 ## 4. UI/UX 컴포넌트 및 인터랙션 규격
@@ -141,3 +232,20 @@ type PreviewOverride = Partial<
 * **루틴 프리뷰 표**: 운동명, kg, set, rep를 한 화면에서 스캔 가능해야 함
 * **하단 CTA**: `내 루틴 시작하기` 버튼은 항상 화면 하단에 고정
 * **설정 진입 방식**: 홈 화면의 분할/강도/휴식은 별도 카드가 아니라 설정 버튼으로 진입
+### 4.4 운동 화면 규격 (Workout Screen Rule)
+
+* **표시 원칙**: 운동 화면은 현재 운동과 현재 세트 정보만 강조 표시한다.
+* **진행도 표시**: `(현재세트/총세트)` 형식으로 표시한다.
+* **세트 편집 UI**:
+  - 중량 좌/우 버튼: 5kg 단위 감소/증가
+  - 반복 좌/우 버튼: 1회 단위 감소/증가
+* **운동 전환 UI**: `다른 운동하기` 버튼을 통해 운동 전환 메뉴를 연다.
+
+### 4.5 휴식 화면 규격 (Rest Screen Rule)
+
+* **화면 전환**: DONE 직후 `WORKOUT` 화면이 아닌 `REST` 화면으로 전환한다.
+* **상단 영역**: 설정 버튼 배치, 휴식 시간 변경 가능
+* **중앙 영역**:
+  - 광고 가능 시 광고 UI 노출
+  - 광고 미노출 시 남은 휴식 시간 중앙 표시
+* **하단 영역**: `휴식 완료하기` 버튼을 크게 고정 배치
