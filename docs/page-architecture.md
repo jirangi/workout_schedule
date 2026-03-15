@@ -72,55 +72,211 @@
 
 예시 구조
 
-```tsx
-"use client"
+"use client";
 
-import ...
-import ...
+import { useEffect, useMemo, useRef, useState } from "react";
+import { EXERCISE_DATABASE, ExerciseInfo } from "../data/exercises";
 
-type View = ...
-interface SelectedRoutine = ...
-interface SetLog = ...
+type View = "HOME" | "WORKOUT" | "REST" | "CHECK" | "FINISH";
+type RoutineType = "무분할" | "상체" | "하체";
+type Intensity = "LIGHT" | "NORMAL" | "HARD";
+type VolumeMode = "LOW" | "NORMAL" | "HIGH";
 
-const STORAGE_KEY = "MINIMAL_FIT_DATA"
-const DEFAULT_REST_SECONDS = 60
-const DAILY_REWARD_LIMIT = 2
-const REWARD_AMOUNT = 30
+interface UserPersistence {
+  userPoints: number;
+  rewardStatus: {
+    date: string;
+    count: number;
+  };
+  lastIndices: Record<string, number>;
+}
 
-export default function Home() {
-  // 1) state
-  ...
+interface PreviewOverride {
+  defaultWeight?: number;
+  defaultReps?: number;
+  setCount?: number;
+}
+
+interface RoutineExercise extends ExerciseInfo {
+  setCount: number;
+}
+
+interface WorkoutSet {
+  id: number;
+  weight: number;
+  reps: number;
+  completed: boolean;
+  isEdited: boolean;
+}
+
+interface SessionExercise extends RoutineExercise {
+  order: number;
+  originalIndex: number;
+  sets: WorkoutSet[];
+  completed: boolean;
+  skipped: boolean;
+  completedAt?: string;
+}
+
+interface WorkoutSession {
+  startedAt: string;
+  routineType: RoutineType;
+  intensity: Intensity;
+  volumeMode: VolumeMode;
+  exercises: SessionExercise[];
+  currentExerciseIndex: number;
+  currentSetIndex: number;
+  elapsedSeconds: number;
+  isResting: boolean;
+  timeLeft: number;
+}
+
+interface SessionSummary {
+  durationSeconds: number;
+  totalVolume: number;
+  finishedAt: string;
+  finishedEarly: boolean;
+}
+
+const STORAGE_KEY = "MINIMAL_FIT_DATA";
+const WORKOUT_SESSION_KEY = "MINIMAL_FIT_WORKOUT_SESSION";
+const LAST_SUMMARY_KEY = "MINIMAL_FIT_LAST_SUMMARY";
+const DEFAULT_REST_SECONDS = 60;
+const DAILY_REWARD_LIMIT = 2;
+const REWARD_AMOUNT = 30;
+
+export default function Page() {
+  // 1) component state
+  const [view, setView] = useState<View>("HOME");
+  const [userData, setUserData] = useState<UserPersistence>({
+    userPoints: 0,
+    rewardStatus: { date: "", count: 0 },
+    lastIndices: {},
+  });
+
+  const [routineType, setRoutineType] = useState<RoutineType>("무분할");
+  const [intensity, setIntensity] = useState<Intensity>("NORMAL");
+  const [volumeMode, setVolumeMode] = useState<VolumeMode>("NORMAL");
+  const [activeCategories, setActiveCategories] = useState<string[]>([]);
+  const [previewOverrides, setPreviewOverrides] = useState<Record<string, PreviewOverride>>({});
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  const [session, setSession] = useState<WorkoutSession | null>(null);
+
+  const [restDuration, setRestDuration] = useState(DEFAULT_REST_SECONDS);
+  const [isRestSettingOpen, setIsRestSettingOpen] = useState(false);
+  const [isAdLoading, setIsAdLoading] = useState(false);
+  const [adFallbackVisible, setAdFallbackVisible] = useState(false);
+  const [switchMenuOpen, setSwitchMenuOpen] = useState(false);
+
+  const [lastSessionSummary, setLastSessionSummary] = useState<SessionSummary | null>(null);
 
   // 2) refs
-  ...
+  const timerRef = useRef<number | null>(null);
+  const restRef = useRef<number | null>(null);
 
-  // 3) effects
-  ...
+  // 3) persistence effects
+  useEffect(() => {
+    // localStorage load
+  }, []);
 
-  // 4) derived values
-  ...
+  useEffect(() => {
+    // userData save
+  }, [userData]);
 
-  // 5) actions
-  ...
+  useEffect(() => {
+    // session save
+  }, [session]);
 
-  // 6) render helpers
-  const renderHomeView = () => ...
-  const renderWorkoutView = () => ...
-  const renderCheckView = () => ...
-  const renderFinishView = () => ...
+  // 4) timer effects
+  useEffect(() => {
+    if (view !== "WORKOUT" || !session) return;
+    // elapsed time tick
+  }, [view, session?.startedAt]);
 
-  // 7) main return
+  useEffect(() => {
+    if (view !== "REST" || !session?.isResting) return;
+    // rest timer tick
+  }, [view, session?.isResting]);
+
+  // 5) derived values
+  const currentExercise =
+    session ? session.exercises[session.currentExerciseIndex] ?? null : null;
+
+  const currentSet =
+    session && currentExercise
+      ? currentExercise.sets[session.currentSetIndex] ?? null
+      : null;
+
+  const hasActiveSession = !!session;
+
+  const previewRoutine = useMemo(() => {
+    // preview routine build
+    return [];
+  }, [routineType, intensity, volumeMode, activeCategories, previewOverrides]);
+
+  // 6) routine actions
+  function startNewRoutine() {}
+  function resumeWorkout() {}
+  function handleStartOrResume() {}
+  function toggleCategory(category: string) {}
+  function handlePreviewValueEdit() {}
+
+  // 7) set actions
+  function syncSetValue(setIndex: number, field: "weight" | "reps", value: number) {}
+  function adjustCurrentSet(field: "weight" | "reps", delta: number) {}
+  function completeCurrentSet() {}
+
+  // 8) reward actions
+  function triggerAdReward() {}
+
+  // 9) session actions
+  function changeCurrentExercise(exerciseIndex: number) {}
+  function moveToNextExerciseManually() {}
+  function moveToNextCategory() {}
+  function moveToSamePartAlternative() {}
+  function moveToNextPosition(nextSession: WorkoutSession) {
+    return nextSession;
+  }
+  function skipRest() {}
+  function finishTodayEarly() {}
+  function finishWorkout(sourceSession: WorkoutSession, finishedEarly: boolean) {}
+
+  // 10) render helpers
+  function renderHomeView() {
+    return null;
+  }
+
+  function renderWorkoutView() {
+    return null;
+  }
+
+  function renderRestView() {
+    return null;
+  }
+
+  function renderCheckView() {
+    return null;
+  }
+
+  function renderFinishView() {
+    return null;
+  }
+
+  // 11) main return
   switch (view) {
     case "HOME":
-      return renderHomeView()
+      return renderHomeView();
     case "WORKOUT":
-      return renderWorkoutView()
+      return renderWorkoutView();
+    case "REST":
+      return renderRestView();
     case "CHECK":
-      return renderCheckView()
+      return renderCheckView();
     case "FINISH":
-      return renderFinishView()
+      return renderFinishView();
     default:
-      return null
+      return null;
   }
 }
 ```
